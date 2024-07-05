@@ -1,0 +1,10 @@
+venv
+.venv
+chunks
+*.tif
+projects.txt
+*.yml
+*.yaml
+*.npy
+__pycache__
+*.pth
