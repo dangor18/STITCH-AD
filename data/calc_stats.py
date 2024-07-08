@@ -25,6 +25,7 @@ def calc_sdv(means: List[int], chunk_path: str, num_channels: int):
     channel_sums = np.zeros(shape=(num_channels,), dtype=np.float64)
 
     for root, dirs, files in os.walk(chunk_path):
+        if os.path.basename(root) in ["normal", "case_1", "case_2"]:
             for file in files:
                 file_path = os.path.join(root, file)
                 file_data = np.load(file_path)
@@ -68,20 +69,21 @@ if __name__ == "__main__":
 
     train_means = calc_mean(path, num_channels)
     train_sdv = calc_sdv(train_means, path, num_channels)
-    percentiles = calc_percentiles(path, num_channels, [1, 99])
+    #percentiles = calc_percentiles(path, num_channels, [1, 99])
     
     # write to file in data_stats folder
     # make data_stats folder if it doesn't exist
-    if not os.path.exists("data_stats"):
-        os.makedirs("data_stats")
+    base_pth = os.path.dirname(os.path.abspath(__file__))
+    data_pth = os.path.join(base_pth, "data_stats/")
+    os.makedirs(data_pth, exist_ok=True)
     
-    mean_path = os.path.join("data_stats", "train_means.npy")
-    sdv_path = os.path.join("data_stats", "train_sdv.npy")
-    percentiles_path = os.path.join("data_stats", "train_percentiles.npy")
+    mean_path = os.path.join(data_pth, "train_means.npy")
+    sdv_path = os.path.join(data_pth, "train_sdv.npy")
+    #percentiles_path = os.path.join("data_stats", "train_percentiles.npy")
     
     np.save(mean_path, train_means)
     print("Means for each channel: ", train_means)
     np.save(sdv_path, train_sdv)
     print("Standard Deviation for each channel: ", train_sdv)
-    np.save(percentiles_path, percentiles)
-    print("Percentiles (1st and 99th) for each channel:", percentiles)
+    #np.save(percentiles_path, percentiles)
+    #print("Percentiles (1st and 99th) for each channel:", percentiles)

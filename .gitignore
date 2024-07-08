@@ -2,3 +2,10 @@ venv
 mvtec
 checkpoints
 __pycache__
+chunks
+*.tif
+*.yml
+*.yaml
+*.npy
+__pycache__
+*.pth

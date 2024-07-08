@@ -1,11 +1,11 @@
 import torch
-from dataset import get_data_transforms, load_data
+from model_utils.dataset import get_data_transforms, load_data
 from torchvision.datasets import ImageFolder
 import numpy as np
 from torch.utils.data import DataLoader
-from resnet import resnet18, resnet34, resnet50, wide_resnet50_2
-from de_resnet import de_resnet18, de_resnet50, de_wide_resnet50_2
-from dataset import MVTecDataset
+from model_utils.resnet import resnet18, resnet34, resnet50, wide_resnet50_2
+from model_utils.de_resnet import de_resnet18, de_resnet50, de_wide_resnet50_2
+from model_utils.dataset import MVTecDataset
 from torch.nn import functional as F
 from sklearn.metrics import roc_auc_score
 import cv2
@@ -64,56 +64,106 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, dataloader,device,_class_=None):
+from collections import defaultdict
+
+import torch
+import numpy as np
+from scipy.ndimage import gaussian_filter
+from collections import defaultdict
+from sklearn.metrics import roc_auc_score
+import matplotlib.pyplot as plt
+
+def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_plot_per_class=5):
     """
-    Evaluate the model
+    Evaluate the model for multiple anomaly types
     """
-    #_, t_bn = resnet50(pretrained=True)
-    #bn.load_state_dict(bn.state_dict())
     bn.eval()
-    #bn.training = False
-    #t_bn.to(device)
-    #t_bn.load_state_dict(bn.state_dict())
     decoder.eval()
-    gt_list_px = []
-    pr_list_px = []
-    gt_list_sp = []
-    pr_list_sp = []
-    aupro_list = []
+   
+    gt_list_case1, gt_list_case2, pr_list_case1, pr_list_case2 = [], [], [], []
+    gt_list_overall, pr_list_overall = [], []
+   
+    plot_count = defaultdict(int)
+   
     with torch.no_grad():
-        for img, gt, label, _ in dataloader:
+        for _, img, label in data_loader:
             img = img.to(device)
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a') # parse encoder feature maps (inputs), and decoder feature maps (outputs)
-            anomaly_map = gaussian_filter(anomaly_map, sigma=4)                             # to calculate the anomaly map (anomaly score)
-            # binarize the ground truth image (NOTE: in this dataset the gt is a mask with all 0s if normal)
-            gt[gt > 0.5] = 1
-            gt[gt <= 0.5] = 0
-            if label.item()!=0:
-                # calc pro score if the label image is anomalous
-                aupro_list.append(compute_pro(gt.squeeze(0).cpu().numpy().astype(int),
-                                              anomaly_map[np.newaxis,:,:]))
-            # TODO: remove pixel level ROC AUC
-            gt_list_px.extend(gt.cpu().numpy().astype(int).ravel())
-            pr_list_px.extend(anomaly_map.ravel())
-            # this is image level. it takes maxes of the anomaly map and ground truth. 
-            gt_list_sp.append(np.max(gt.cpu().numpy().astype(int)))
-            pr_list_sp.append(np.max(anomaly_map))
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
+            anomaly_map = gaussian_filter(anomaly_map, sigma=4)
+           
+            anomaly_score = np.max(anomaly_map)
+           
+            if label.item() == 0:  # case_1 anomaly
+                gt_list_case1.append(1)
+                pr_list_case1.append(anomaly_score)
+                gt_list_overall.append(1)
+                pr_list_overall.append(anomaly_score)
+            elif label.item() == 1:  # case_2 anomaly
+                gt_list_case2.append(1)
+                pr_list_case2.append(anomaly_score)
+                gt_list_overall.append(1)
+                pr_list_overall.append(anomaly_score)
+            elif label.item() == 2:  # normal
+                gt_list_case1.append(0)
+                gt_list_case2.append(0)
+                pr_list_case1.append(anomaly_score)
+                pr_list_case2.append(anomaly_score)
+                gt_list_overall.append(0)
+                pr_list_overall.append(anomaly_score)
 
-        #ano_score = (pr_list_sp - np.min(pr_list_sp)) / (np.max(pr_list_sp) - np.min(pr_list_sp))
-        #vis_data = {}
-        #vis_data['Anomaly Score'] = ano_score
-        #vis_data['Ground Truth'] = np.array(gt_list_sp)
-        # print(type(vis_data))
-        # np.save('vis.npy',vis_data)
-        #with open('{}_vis.pkl'.format(_class_), 'wb') as f:
-        #    pickle.dump(vis_data, f, pickle.HIGHEST_PROTOCOL)
+            if plot_results and plot_count[label.item()] < n_plot_per_class:
+                plot_sample(img, label.item(), anomaly_score)
+                plot_count[label.item()] += 1
+    
+    # Calculate AUROC for each case
+    auroc_case1 = calculate_auroc(gt_list_case1, pr_list_case1, "Case 1")
+    auroc_case2 = calculate_auroc(gt_list_case2, pr_list_case2, "Case 2")
+    auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall, "Overall")
+    return auroc_overall, auroc_case1, auroc_case2
 
+def calculate_auroc(gt_list, pr_list, case_name):
+    if len(set(gt_list)) == 2:
+        auroc = round(roc_auc_score(gt_list, pr_list), 3)
+        print(f"{case_name} AUROC: {auroc:.3f}")
+        return auroc
+    else:
+        print(f"Warning: Only one class present for {case_name}. ROC AUC score cannot be calculated.")
+        return None
 
-        auroc_px = round(roc_auc_score(gt_list_px, pr_list_px), 3)
-        auroc_sp = round(roc_auc_score(gt_list_sp, pr_list_sp), 3)
-    return auroc_px, auroc_sp, round(np.mean(aupro_list),3)
+def plot_sample(img, label, anomaly_score):
+    """
+    Plot the input image, class, and anomaly score
+    """
+    plt.figure(figsize=(15, 5))
+   
+    # Plot the image channels
+    channel_names = ['DEM', 'NIR', 'RED']
+    for i in range(3):
+        plt.subplot(1, 4, i+1)
+        plt.imshow(img.cpu().squeeze()[i], cmap='gray')
+        plt.title(f"{channel_names[i]} Channel")
+        plt.axis('off')
+   
+    # Plot the class and anomaly score
+    plt.subplot(1, 4, 4)
+    plt.text(0.5, 0.6, f"Class: {get_class_name(label)}", ha='center', va='center', fontsize=12)
+    plt.text(0.5, 0.4, f"Anomaly Score: {anomaly_score:.4f}", ha='center', va='center', fontsize=12)
+    plt.axis('off')
+   
+    plt.tight_layout()
+    plt.show()
+
+def get_class_name(label):
+    if label == 0:
+        return "Case 1"
+    elif label == 1:
+        return "Case 2"
+    elif label == 2:
+        return "Normal"
+    else:
+        return "Unknown"
 
 def test(_class_):
     """
