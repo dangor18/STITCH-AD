@@ -21,6 +21,7 @@ from matplotlib.ticker import NullFormatter
 from scipy.spatial.distance import pdist
 import matplotlib
 import pickle
+from collections import defaultdict
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
     """
@@ -64,15 +65,6 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-from collections import defaultdict
-
-import torch
-import numpy as np
-from scipy.ndimage import gaussian_filter
-from collections import defaultdict
-from sklearn.metrics import roc_auc_score
-import matplotlib.pyplot as plt
-
 def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_plot_per_class=5):
     """
     Evaluate the model for multiple anomaly types
@@ -86,8 +78,9 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
     plot_count = defaultdict(int)
    
     with torch.no_grad():
-        for _, img, label in data_loader:
-            img = img.to(device)
+        for input in data_loader:
+            img = input["image"].to(device)
+            label = input["label"].item()
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
@@ -95,28 +88,28 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
            
             anomaly_score = np.max(anomaly_map)
            
-            if label.item() == 0:  # case_1 anomaly
+            if label == 1:  # case_1 anomaly
                 gt_list_case1.append(1)
                 pr_list_case1.append(anomaly_score)
                 gt_list_overall.append(1)
                 pr_list_overall.append(anomaly_score)
-            elif label.item() == 1:  # case_2 anomaly
+            elif label == 2:  # case_2 anomaly
                 gt_list_case2.append(1)
                 pr_list_case2.append(anomaly_score)
                 gt_list_overall.append(1)
                 pr_list_overall.append(anomaly_score)
-            elif label.item() == 2:  # normal
+            elif label == 0:  # normal
                 gt_list_case1.append(0)
                 gt_list_case2.append(0)
                 pr_list_case1.append(anomaly_score)
                 pr_list_case2.append(anomaly_score)
                 gt_list_overall.append(0)
                 pr_list_overall.append(anomaly_score)
-
-            if plot_results and plot_count[label.item()] < n_plot_per_class:
-                plot_sample(img, label.item(), anomaly_score)
-                plot_count[label.item()] += 1
-    
+            
+            if plot_results and plot_count[label] < n_plot_per_class:
+                plot_sample(img, label, anomaly_score)
+                plot_count[label] += 1
+   
     # Calculate AUROC for each case
     auroc_case1 = calculate_auroc(gt_list_case1, pr_list_case1, "Case 1")
     auroc_case2 = calculate_auroc(gt_list_case2, pr_list_case2, "Case 2")
