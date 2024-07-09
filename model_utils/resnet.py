@@ -344,6 +344,47 @@ class AttnBasicBlock(nn.Module):
 
         return out
 
+class GLEAM(nn.Module):
+    def __init__(self, channels, reduction_ratio=16):
+        super(GLEAM, self).__init__()
+        if isinstance(channels, list):
+            self.channels = sum(channels)
+        else:
+            self.channels = channels
+        self.reduction_ratio = reduction_ratio
+
+        # Global attention
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.global_fc = nn.Sequential(
+            nn.Linear(self.channels, self.channels // reduction_ratio),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.channels // reduction_ratio, self.channels),
+            nn.Sigmoid()
+        )
+
+        # Local attention
+        self.local_conv = nn.Conv2d(self.channels, 1, kernel_size=7, padding=3)
+
+    def forward(self, x):
+        if isinstance(x, list):
+            # Concatenate multi-scale features if input is a list
+            x = torch.cat(x, dim=1)
+        
+        b, c, _, _ = x.size()
+        
+        # Global attention
+        global_weight = self.global_avg_pool(x).view(b, c)
+        global_weight = self.global_fc(global_weight).view(b, c, 1, 1)
+
+        # Local attention
+        local_weight = self.local_conv(x)
+        local_weight = nn.functional.sigmoid(local_weight)
+
+        # Combine global and local attention
+        weight = global_weight * local_weight
+
+        return x * weight
+
 class AttnBottleneck(nn.Module):
     
     expansion: int = 4
@@ -374,15 +415,11 @@ class AttnBottleneck(nn.Module):
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
-        #self.cbam = GLEAM([int(planes * self.expansion/4),
-        #                   int(planes * self.expansion//2),
-        #                   planes * self.expansion], 16)
+        self.cbam = GLEAM(planes * self.expansion, 16)
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x: Tensor) -> Tensor:
-        #if self.attention:
-        #    x = self.cbam(x)
         identity = x
 
         out = self.conv1(x)
@@ -396,9 +433,11 @@ class AttnBottleneck(nn.Module):
         out = self.conv3(out)
         out = self.bn3(out)
 
+        if self.attention:
+            out = self.cbam(out)
+
         if self.downsample is not None:
             identity = self.downsample(x)
-
 
         out += identity
         out = self.relu(out)

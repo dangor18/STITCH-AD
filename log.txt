@@ -1,0 +1,23 @@
+VANILLA:
+epoch [10/100], loss:0.3075
+Case 1 AUROC: 0.563, Case 2 AUROC: 0.755, Overall AUROC: 0.686
+epoch [20/100], loss:0.2293
+Case 1 AUROC: 0.333, Case 2 AUROC: 0.754, Overall AUROC: 0.603
+epoch [30/100], loss:0.2000
+Case 1 AUROC: 0.106, Case 2 AUROC: 0.552, Overall AUROC: 0.392
+epoch [40/100], loss:0.1966
+Case 1 AUROC: 0.104, Case 2 AUROC: 0.611, Overall AUROC: 0.430
+epoch [50/100], loss:0.1691
+Case 1 AUROC: 0.069, Case 2 AUROC: 0.678, Overall AUROC: 0.460
+epoch [60/100], loss:0.1573
+Case 1 AUROC: 0.121, Case 2 AUROC: 0.697, Overall AUROC: 0.491
+epoch [70/100], loss:0.1565
+Case 1 AUROC: 0.106, Case 2 AUROC: 0.655, Overall AUROC: 0.458
+epoch [80/100], loss:0.1460
+Case 1 AUROC: 0.083, Case 2 AUROC: 0.675, Overall AUROC: 0.463
+epoch [90/100], loss:0.1416
+Case 1 AUROC: 0.095, Case 2 AUROC: 0.699, Overall AUROC: 0.483
+epoch [100/100], loss:0.1361
+Case 1 AUROC: 0.121, Case 2 AUROC: 0.689, Overall AUROC: 0.485
+
+CLAUDE GLEAM:

@@ -150,11 +150,13 @@ def plot_sample(img, label, anomaly_score):
 
 def get_class_name(label):
     if label == 0:
-        return "Case 1"
-    elif label == 1:
-        return "Case 2"
-    elif label == 2:
         return "Normal"
+    elif label == 1:
+        return "Case 1"
+    elif label == 2:
+        return "Case 2"
+    elif label == 3:
+        return "Case 3"
     else:
         return "Unknown"
 

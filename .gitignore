@@ -1,4 +1,5 @@
 venv
+testenv
 mvtec
 checkpoints
 __pycache__
@@ -9,3 +10,4 @@ chunks
 *.npy
 __pycache__
 *.pth
+*.txt
