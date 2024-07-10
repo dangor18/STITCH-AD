@@ -33,6 +33,10 @@ class CustomDataset(Dataset):
             for line in f_r:
                 meta = json.loads(line)
                 self.metas.append(meta)
+        
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+        self.normalize = transforms.Normalize(mean=mean, std=std)
 
     def __len__(self):
         return len(self.metas)
@@ -44,11 +48,8 @@ class CustomDataset(Dataset):
         # read image
         filename = os.path.join(self.data_path, meta["filename"])
         label = meta["label"]
-        if os.path.exists(filename):
-            image = np.load(filename)
-        else:
-            print(f"File {filename} does not exist.")
-            exit()
+
+        image = np.load(filename)
 
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -70,7 +71,7 @@ class CustomDataset(Dataset):
         if self.transform_fn:
             image = self.transform_fn(image)
 
-        image = transforms.ToTensor()(image).float()
+        image = transforms.ToTensor()(image)
         
         # cut image down to one channel
         #image = image[0].unsqueeze(0)
@@ -78,34 +79,32 @@ class CustomDataset(Dataset):
         if "mean" in meta and "std" in meta:
             #mean=np.array(meta["mean"])/255
             #std=np.array(meta["std"])/255
-            mean = [0.485, 0.456, 0.406]
-            std = [0.229, 0.224, 0.225]
-            normalize_fn = transforms.Normalize(mean=mean, std=std)
-            image = normalize_fn(image)
+            image = self.normalize(image)
         #if torch.any(image > 1) or torch.any(image < -1):
         #    print(f"Warning: Image {filename} has values outside [-1, 1] range.")
         #    print(f"Min value: {image.min().item()}, Max value: {image.max().item()}")
         input.update({"image": image})
-        noisy_image = add_noise(image, self.noise_factor, self.p)
+        noisy_image = self.add_noise(image, self.noise_factor, self.p)
         input.update({"noisy_image": noisy_image})
         
         return input
 
-def add_noise(image, noise_factor, p):
-    '''
-    Function to randomly add noise to the image.
+    @staticmethod
+    def add_noise(image, noise_factor, p):
+        '''
+        Function to randomly add noise to the image.
 
-    Parameters:
-    ----------
-    img : torch.Tensor
-        The image to add noise to.
-    noise_factor : float
-        The factor to multiply the noise by.
-    p : float
-        The probability of adding noise to the image.
-    '''
-    if np.random.rand() > p:
-        return image
-    noise = torch.randn_like(image) * noise_factor
-    noisy_image = image + noise
-    return torch.clamp(noisy_image, 0., 1.)
+        Parameters:
+        ----------
+        img : torch.Tensor
+            The image to add noise to.
+        noise_factor : float
+            The factor to multiply the noise by.
+        p : float
+            The probability of adding noise to the image.
+        '''
+        if np.random.rand() > p:
+            return image
+        noise = torch.randn_like(image) * noise_factor
+        noisy_image = image + noise
+        return torch.clamp(noisy_image, 0., 1.)

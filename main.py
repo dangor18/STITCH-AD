@@ -9,12 +9,12 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 import numpy as np
 
-from model_utils.resnet import wide_resnet50_2, resnet50
-from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50
+from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
+from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2
 from model_utils.test import evaluation
 
-from data.dataset_loader import CustomDataset
-
+#from data.dataset_loader import CustomDataset
+from old_dataloader import CustomDataset
 from tqdm import tqdm
 
 # ignore deprecation warnings
@@ -63,7 +63,7 @@ def train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device):
     return loss_sum / num_batches if num_batches > 0 else 0.0
 
 def train(input_channels, num_epochs, train_loader, test_loader, learning_rate, weight_decay, model_path, device):
-    encoder, bn = wide_resnet50_2(pretrained=True)
+    encoder, bn = wide_resnet50_2(pretrained=True, attention = True)
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
@@ -97,7 +97,7 @@ def train(input_channels, num_epochs, train_loader, test_loader, learning_rate, 
     
     #auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device, plot_results=True, n_plot_per_class=50)
 
-    return auroc_overall, auroc_case1, auroc_case2
+    return auroc_overall
 
 if __name__ == '__main__':
     setup_seed(111)
@@ -125,7 +125,7 @@ if __name__ == '__main__':
 
     print("[INFO] STARTING TRAINING...")
     start_time = time.time()
-    auroc_overall, auroc_case1, auroc_case2 = train(
+    auroc_overall = train(
         cfg["channels"], 
         cfg["num_epochs"], 
         train_loader, 
@@ -139,4 +139,4 @@ if __name__ == '__main__':
     training_duration = end_time - start_time
     num_epochs = cfg["num_epochs"]
     print(f"\n[INFO] TRAINING COMPLETED {num_epochs} EPOCHS IN {training_duration/3600:.2f} hours")
-    print(f"[INFO] FINAL RESULTS:\n OVERALL AUROC: {auroc_overall:.3f}, Case 1 AUROC: {auroc_case1:.3f}, Case 2 AUROC: {auroc_case2:.3f}")
+    print(f"[INFO] FINAL RESULTS:\n OVERALL AUROC: {auroc_overall:.3f}")

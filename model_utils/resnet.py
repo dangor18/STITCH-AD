@@ -454,12 +454,14 @@ class BN_layer(nn.Module):
                  groups: int = 1,
                  width_per_group: int = 64,
                  norm_layer: Optional[Callable[..., nn.Module]] = None,
+                 attention: bool = True
                  ):
         super(BN_layer, self).__init__()
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
 
+        self._attention = attention
         self._norm_layer = norm_layer
         self.groups = groups
         self.base_width = width_per_group
@@ -500,13 +502,14 @@ class BN_layer(nn.Module):
             )
 
         layers = []
+        print(f"Bottleneck attention: {self._attention}")
         layers.append(block(self.inplanes*3, planes, stride, downsample, self.groups,
-                            self.base_width, previous_dilation, norm_layer))
+                            self.base_width, previous_dilation, norm_layer, attention=self._attention))
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
             layers.append(block(self.inplanes, planes, groups=self.groups,
                                 base_width=self.base_width, dilation=self.dilation,
-                                norm_layer=norm_layer))
+                                norm_layer=norm_layer, attention=self._attention))
 
         return nn.Sequential(*layers)
 
@@ -605,7 +608,7 @@ def resnext101_32x8d(pretrained: bool = False, progress: bool = True, **kwargs: 
                    pretrained, progress, **kwargs)
 
 
-def wide_resnet50_2(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-50-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels
@@ -618,7 +621,7 @@ def wide_resnet50_2(pretrained: bool = False, progress: bool = True, **kwargs: A
     """
     kwargs['width_per_group'] = 64 * 2
     # NOTE: returns the model AND the BN_layer
-    return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3,**kwargs)
+    return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3, attention=attention, **kwargs)
 
 
 def wide_resnet101_2(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:

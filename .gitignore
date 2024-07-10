@@ -8,6 +8,5 @@ chunks
 *.yml
 *.yaml
 *.npy
-__pycache__
 *.pth
-*.txt
+log.txt

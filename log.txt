@@ -1,3 +1,0 @@
-
-epoch [10/100], loss:0.1961
-Case 1 AUROC: 0.701, Case 2 AUROC: 0.544, Overall AUROC: 0.591
