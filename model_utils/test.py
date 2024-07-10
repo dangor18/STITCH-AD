@@ -115,7 +115,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
                 plot_sample(img, label, anomaly_score)
                 plot_count[label] += 1
    
-    # Calculate AUROC for each case for each orchard
+    # calculate AUROC for each case for each orchard
     for orchard_id, orchard_data in orchard_results.items():
         auroc_case1 = calculate_auroc(orchard_data["gt_case1"], orchard_data["pr_case1"])
         auroc_case2 = calculate_auroc(orchard_data["gt_case2"], orchard_data["pr_case2"])
@@ -123,7 +123,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
         with open("log.txt", "a") as file:
             file.write(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}")
 
-    # Calculate AUROC overall
+    # calculate AUROC overall
     auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall)
     return auroc_overall
 

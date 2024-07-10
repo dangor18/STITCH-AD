@@ -3,6 +3,8 @@ import warnings
 import random
 import os
 import yaml
+import argparse
+import optuna
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -13,8 +15,8 @@ from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
 from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2
 from model_utils.test import evaluation
 
-#from data.dataset_loader import CustomDataset
-from old_dataloader import CustomDataset
+from data.dataset_loader import CustomDataset
+
 from tqdm import tqdm
 
 # ignore deprecation warnings
@@ -37,15 +39,17 @@ def loss_function(a, b):
     return loss
 
 def train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device):
+    """
+    Train the model for one epoch and return the average loss
+    """
     bn.train()
     decoder.train()
     loss_sum = 0.0
     num_batches = 0
     
-    progress_bar = tqdm(train_loader, desc='Training')
+    train_data = tqdm(train_loader)
     
-    for input in progress_bar:
-        noisy_images = input["noisy_image"].to(device)
+    for input in train_data:
         images = input["image"].to(device)
         
         inputs = encoder(images)
@@ -60,83 +64,126 @@ def train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device):
         loss_sum += loss.item()
         num_batches += 1
     
-    return loss_sum / num_batches if num_batches > 0 else 0.0
+    return loss_sum / num_batches
 
-def train(input_channels, num_epochs, train_loader, test_loader, learning_rate, weight_decay, model_path, device):
-    encoder, bn = wide_resnet50_2(pretrained=True, attention = True)
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    encoder.eval()
-    decoder = de_wide_resnet50_2(pretrained=False)
-    decoder = decoder.to(device)
+def create_model(architecture: str = "wide_resnet50_2", attention: bool = True):
+    """
+    Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
+    """
+    if architecture == "wide_resnet50_2":
+        encoder, bn = wide_resnet50_2(pretrained=True, attention=attention)
+        decoder = de_wide_resnet50_2(pretrained=False)
+    elif architecture == "resnet50":
+        encoder, bn = resnet50(pretrained=True, attention=attention)
+        decoder = de_resnet50(pretrained=False)
+    elif architecture == "wide_resnet101_2":
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=attention)
+        decoder = de_wide_resnet101_2(pretrained=False)
+    elif architecture == "asym":
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=attention)
+        decoder = de_wide_resnet50_2(pretrained=False)
+    else:
+        raise ValueError(f"Unknown model architecture: {architecture}")
+    return encoder, bn, decoder
 
-    optimizer = torch.optim.Adam(list(decoder.parameters())+list(bn.parameters()), lr=learning_rate, betas=(0.5,0.999))
-
-    for epoch in range(num_epochs):
-        start_time = time.time()
-        avg_loss = 0
-        avg_loss = train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device)
-        
-        end_time = time.time()
-        training_duration = end_time - start_time
-        print(f'EPOCH [{epoch + 1}/{num_epochs}], LOSS: {avg_loss:.4f}, TIME: {training_duration/60:.2f} MINUTES')
-    
-        if (epoch + 1) % 10 == 0:
-            with open("log.txt", "a") as file:
-                file.write(f'\nEPOCH [{epoch + 1}/{num_epochs}], LOSS: {avg_loss:.4f}, TIME: {training_duration/60:.2f} MINUTES')
-
-            auroc_overall = evaluation(encoder, bn, decoder, test_loader, device)
-
-            print(f"Epoch {epoch + 1} Evaluation:")
-            print(f'Overall AUROC: {auroc_overall:.3f}')
-
-            with open("log.txt", "a") as file:
-                file.write(f"\n- OVERALL AUROC: {auroc_overall:.3f}")
-            
-            torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, model_path)
-    
-    #auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device, plot_results=True, n_plot_per_class=50)
-
-    return auroc_overall
-
-if __name__ == '__main__':
-    setup_seed(111)
-
+def train(params, trial=None):
+    """
+    Train the model with the specified parameters and return the best overall AUROC score
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print('Using device:', device)
-
-    # Load configuration
-    with open("model_config.yaml", "r") as ymlfile:
-        cfg = yaml.safe_load(ymlfile)
-
-    # Create data loaders
+    
+    # create data loaders
     print("[INFO] LOADING DATA...")
-    train_data = CustomDataset(cfg["meta_path"] + "train_metadata.json", cfg["data_path"], None, (cfg["resize_x"], cfg["resize_y"]), noise_factor=cfg["noise_factor"], p=cfg["p"])
+    train_data = CustomDataset(params["meta_path"] + "train_metadata.json", params["data_path"], None, (params["resize_x"], params["resize_y"]), noise_factor=params["noise_factor"], p=params["p"])
     train_loader = DataLoader(
         train_data, 
-        batch_size=cfg["batch_size"], 
+        batch_size=params["batch_size"], 
         shuffle=True,
         num_workers=4,
         pin_memory=True,
         persistent_workers=True
     )
-    test_data = CustomDataset(cfg["meta_path"] + "test_metadata.json", cfg["data_path"], None, (cfg["resize_x"], cfg["resize_y"]))
+    test_data = CustomDataset(params["meta_path"] + "test_metadata.json", params["data_path"], None, (params["resize_x"], params["resize_y"]))
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
 
-    print("[INFO] STARTING TRAINING...")
-    start_time = time.time()
-    auroc_overall = train(
-        cfg["channels"], 
-        cfg["num_epochs"], 
-        train_loader, 
-        test_loader, 
-        cfg["learning_rate"], 
-        cfg["weight_decay"], 
-        cfg["model_path"], 
-        device
+    encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
+    encoder = encoder.to(device)
+    bn = bn.to(device)
+    encoder.eval()
+    decoder = decoder.to(device)
+
+    optimizer = torch.optim.Adam(
+        list(decoder.parameters()) + list(bn.parameters()), 
+        lr=params["learning_rate"], 
+        betas=(params.get("beta1", 0.5), params.get("beta2", 0.999)),
+        weight_decay=params["weight_decay"]
     )
-    end_time = time.time()
-    training_duration = end_time - start_time
-    num_epochs = cfg["num_epochs"]
-    print(f"\n[INFO] TRAINING COMPLETED {num_epochs} EPOCHS IN {training_duration/3600:.2f} hours")
-    print(f"[INFO] FINAL RESULTS:\n OVERALL AUROC: {auroc_overall:.3f}")
+
+    best_auroc = 0
+    print("[INFO] TRAINING MODEL...")
+    # train loop
+    for epoch in range(params["num_epochs"]):
+        avg_loss = train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device)
+        
+        # evaluate every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            if trial is None:
+                # write to log file
+                with open(params["log_path"], "a") as log_file:
+                    log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.4f}, OVERALL AUROC: {total_auroc:.3f}\n")
+            
+            total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
+            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.4f}, OVERALL AUROC: {total_auroc:.3f}")
+            
+            if total_auroc > best_auroc:
+                best_auroc = total_auroc
+                if trial is None:  # don't save during parameter tuning
+                    # save model
+                    print("[INFO] NEW BEST. SAVING MODEL...")
+                    torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
+            
+            if trial:  # if using Optuna, report intermediate results and prune training if necessary (poor AUROC performance on current parameters)
+                trial.report(total_auroc, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+    return best_auroc
+
+# objective function for optuna
+def objective(trial):
+    # open config
+    with open("model_config.yaml", "r") as ymlfile:
+        params = yaml.safe_load(ymlfile)
+
+    # set new params
+    params["learning_rate"] = trial.suggest_loguniform("learning_rate", 1e-5, 1e-2)
+    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 12, 16, 20, 32])
+    params["weight_decay"] = trial.suggest_uniform("weight_decay", 0, 1e-3)
+    params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"])
+    params["attention"] = trial.suggest_categorical("attention", [True, False])
+    params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9)
+    params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
+
+    return train(params, trial)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
+    args = parser.parse_args()
+
+    # tune with optuna or train with default parameters from config file
+    if args.tune is True:
+        print("[INFO] TUNING HYPERPARAMETERS...")
+        study = optuna.create_study(direction="maximize")
+        study.optimize(objective, n_trials=100)
+
+        print("[INFO] BEST HYPERPARAMETERS:")
+        trial = study.best_trial
+        for key, val in trial.params.items():
+            print(f"{key}: {val}")
+        print("[INFO] BEST AUROC: ", trial.value)
+    else:
+        with open("model_config.yaml", "r") as config_file:
+            params = yaml.safe_load(config_file)
+        best_auroc = train(params)
+        print(f"[INFO] BEST OVERALL AUROC: {best_auroc:.3f}")

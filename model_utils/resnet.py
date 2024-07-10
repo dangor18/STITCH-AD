@@ -527,7 +527,7 @@ class BN_layer(nn.Module):
         return self._forward_impl(x)
 
 
-def resnet18(pretrained: bool = False, progress: bool = True,**kwargs: Any) -> ResNet:
+def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -549,7 +549,7 @@ def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
                    **kwargs), BN_layer(AttnBasicBlock,3,**kwargs)
 
 
-def resnet50(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+def resnet50(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -557,7 +557,7 @@ def resnet50(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     return _resnet('resnet50', Bottleneck, [3, 4, 6, 3], pretrained, progress,
-                   **kwargs), BN_layer(AttnBottleneck,3,**kwargs)
+                   **kwargs), BN_layer(AttnBottleneck,3,attention=attention, **kwargs)
 
 
 def resnet101(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
@@ -624,7 +624,7 @@ def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: 
     return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3, attention=attention, **kwargs)
 
 
-def wide_resnet101_2(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-101-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels
@@ -637,6 +637,6 @@ def wide_resnet101_2(pretrained: bool = False, progress: bool = True, **kwargs: 
     """
     kwargs['width_per_group'] = 64 * 2
     return _resnet('wide_resnet101_2', Bottleneck, [3, 4, 23, 3],
-                   pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3,**kwargs)
+                   pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3,attention=attention, **kwargs)
 
 
