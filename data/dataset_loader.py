@@ -1,10 +1,13 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import cv2
-import json
+import yaml
+from PIL import Image
 from torchvision import transforms
+import json
 
 class CustomDataset(Dataset):
     def __init__(
@@ -22,47 +25,87 @@ class CustomDataset(Dataset):
         self.resize_dim = resize_dim
         self.noise_factor = noise_factor
         self.p = p
-        
-        # Load meta information
+        self.i= 0
+
+        # construct metas
         with open(meta_file, "r") as f_r:
-            self.metas = [json.loads(line) for line in f_r]
-        
-        # Prepare normalization
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-
-    @staticmethod
-    def add_noise(image, noise_factor, p):
-        if np.random.rand() > p:
-            return image
-        noise = torch.randn_like(image) * noise_factor
-        noisy_image = image + noise
-        return torch.clamp(noisy_image, 0., 1.)
-
-    def load_and_process_image(self, filename):
-        image = np.load(filename)
-        if self.resize_dim:
-            image = cv2.resize(image, self.resize_dim)
-        image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0
-        if self.transform_fn:
-            image = self.transform_fn(image)
-        image = self.normalize(image)
-        return image
+            self.metas = []
+            for line in f_r:
+                meta = json.loads(line)
+                self.metas.append(meta)
 
     def __len__(self):
         return len(self.metas)
 
     def __getitem__(self, index):
+        input = {}
         meta = self.metas[index]
+
+        # read image
         filename = os.path.join(self.data_path, meta["filename"])
         label = meta["label"]
+        if os.path.exists(filename):
+            image = np.load(filename)
+        else:
+            print(f"File {filename} does not exist.")
+            exit()
 
-        image = self.load_and_process_image(filename)
-        noisy_image = self.add_noise(image, self.noise_factor, self.p)
+        if self.resize_dim:
+            image = cv2.resize(image, self.resize_dim)
+        
+        input.update(
+            {
+                "filename": filename,
+                "label": label,
+            }
+        )
 
-        return {
-            "filename": filename,
-            "label": label,
-            "clsname": meta.get("clsname", os.path.basename(os.path.dirname(filename))),
-            "image": image,
-            "noisy_image": noisy_image
-        }
+        if meta.get("clsname", None):
+            input["clsname"] = meta["clsname"]
+        else:
+            input["clsname"] = filename.split("/")[-4]
+
+        image = Image.fromarray(image.squeeze(), mode="RGB")
+
+        if self.transform_fn:
+            image = self.transform_fn(image)
+
+        image = transforms.ToTensor()(image).float()
+        
+        # cut image down to one channel
+        #image = image[0].unsqueeze(0)
+
+        if "mean" in meta and "std" in meta:
+            #mean=np.array(meta["mean"])/255
+            #std=np.array(meta["std"])/255
+            mean = [0.485, 0.456, 0.406]
+            std = [0.229, 0.224, 0.225]
+            normalize_fn = transforms.Normalize(mean=mean, std=std)
+            image = normalize_fn(image)
+        #if torch.any(image > 1) or torch.any(image < -1):
+        #    print(f"Warning: Image {filename} has values outside [-1, 1] range.")
+        #    print(f"Min value: {image.min().item()}, Max value: {image.max().item()}")
+        input.update({"image": image})
+        noisy_image = add_noise(image, self.noise_factor, self.p)
+        input.update({"noisy_image": noisy_image})
+        
+        return input
+
+def add_noise(image, noise_factor, p):
+    '''
+    Function to randomly add noise to the image.
+
+    Parameters:
+    ----------
+    img : torch.Tensor
+        The image to add noise to.
+    noise_factor : float
+        The factor to multiply the noise by.
+    p : float
+        The probability of adding noise to the image.
+    '''
+    if np.random.rand() > p:
+        return image
+    noise = torch.randn_like(image) * noise_factor
+    noisy_image = image + noise
+    return torch.clamp(noisy_image, 0., 1.)

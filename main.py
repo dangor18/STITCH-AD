@@ -92,7 +92,7 @@ def train(input_channels, num_epochs, train_loader, test_loader, learning_rate, 
             
             torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, model_path)
 
-    auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device, plot_results=True, n_plot_per_class=50)
+    #auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device, plot_results=True, n_plot_per_class=50)
 
     return auroc_overall, auroc_case1, auroc_case2
 

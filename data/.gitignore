@@ -8,3 +8,4 @@ projects.txt
 *.npy
 __pycache__
 *.pth
+*.txt
