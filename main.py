@@ -74,24 +74,27 @@ def train(input_channels, num_epochs, train_loader, test_loader, learning_rate, 
 
     for epoch in range(num_epochs):
         start_time = time.time()
-        
+        avg_loss = 0
         avg_loss = train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device)
         
         end_time = time.time()
         training_duration = end_time - start_time
-        print(f'epoch [{epoch + 1}/{num_epochs}], loss: {avg_loss:.4f}, time: {training_duration/60:.2f} minutes')
+        print(f'EPOCH [{epoch + 1}/{num_epochs}], LOSS: {avg_loss:.4f}, TIME: {training_duration/60:.2f} MINUTES')
     
         if (epoch + 1) % 10 == 0:
-            auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device)
+            with open("log.txt", "a") as file:
+                file.write(f'\nEPOCH [{epoch + 1}/{num_epochs}], LOSS: {avg_loss:.4f}, TIME: {training_duration/60:.2f} MINUTES')
+
+            auroc_overall = evaluation(encoder, bn, decoder, test_loader, device)
+
             print(f"Epoch {epoch + 1} Evaluation:")
-            print(f'Overall AUROC: {auroc_overall:.3f}, Case 1 AUROC: {auroc_case1:.3f}, Case 2 AUROC: {auroc_case2:.3f}')
+            print(f'Overall AUROC: {auroc_overall:.3f}')
 
             with open("log.txt", "a") as file:
-                file.write(f'\nepoch [{epoch + 1}/{num_epochs}], loss:{avg_loss:.4f}')
-                file.write(f"\nCase 1 AUROC: {auroc_case1:.3f}, Case 2 AUROC: {auroc_case2:.3f}, Overall AUROC: {auroc_overall:.3f}")
+                file.write(f"\n- OVERALL AUROC: {auroc_overall:.3f}")
             
             torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, model_path)
-
+    
     #auroc_overall, auroc_case1, auroc_case2 = evaluation(encoder, bn, decoder, test_loader, device, plot_results=True, n_plot_per_class=50)
 
     return auroc_overall, auroc_case1, auroc_case2

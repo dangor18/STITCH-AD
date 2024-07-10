@@ -72,15 +72,21 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
     bn.eval()
     decoder.eval()
    
-    gt_list_case1, gt_list_case2, pr_list_case1, pr_list_case2 = [], [], [], []
+    #gt_list_case1, gt_list_case2, pr_list_case1, pr_list_case2 = [], [], [], []
     gt_list_overall, pr_list_overall = [], []
+
+    orchard_results = {}
    
     plot_count = defaultdict(int)
-   
     with torch.no_grad():
         for input in data_loader:
             img = input["image"].to(device)
             label = input["label"].item()
+            orchard_id = input["clsname"][0]
+
+            if orchard_results.get(orchard_id) is None:
+                orchard_results[orchard_id] = {"gt_case1": [], "pr_case1": [], "gt_case2": [], "pr_case2": []}
+
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
@@ -89,40 +95,43 @@ def evaluation(encoder, bn, decoder, data_loader, device, plot_results=False, n_
             anomaly_score = np.max(anomaly_map)
            
             if label == 1:  # case_1 anomaly
-                gt_list_case1.append(1)
-                pr_list_case1.append(anomaly_score)
+                orchard_results[orchard_id]["gt_case1"].append(1)
+                orchard_results[orchard_id]["pr_case1"].append(anomaly_score)
                 gt_list_overall.append(1)
                 pr_list_overall.append(anomaly_score)
             elif label == 2:  # case_2 anomaly
-                gt_list_case2.append(1)
-                pr_list_case2.append(anomaly_score)
+                orchard_results[orchard_id]["gt_case2"].append(1)
+                orchard_results[orchard_id]["pr_case2"].append(anomaly_score)
                 gt_list_overall.append(1)
                 pr_list_overall.append(anomaly_score)
             elif label == 0:  # normal
-                gt_list_case1.append(0)
-                gt_list_case2.append(0)
-                pr_list_case1.append(anomaly_score)
-                pr_list_case2.append(anomaly_score)
+                orchard_results[orchard_id]["gt_case1"].append(0)
+                orchard_results[orchard_id]["gt_case2"].append(0)
+                orchard_results[orchard_id]["pr_case1"].append(anomaly_score)
+                orchard_results[orchard_id]["pr_case2"].append(anomaly_score)
                 gt_list_overall.append(0)
                 pr_list_overall.append(anomaly_score)
-            
             if plot_results and plot_count[label] < n_plot_per_class:
                 plot_sample(img, label, anomaly_score)
                 plot_count[label] += 1
    
-    # Calculate AUROC for each case
-    auroc_case1 = calculate_auroc(gt_list_case1, pr_list_case1, "Case 1")
-    auroc_case2 = calculate_auroc(gt_list_case2, pr_list_case2, "Case 2")
-    auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall, "Overall")
-    return auroc_overall, auroc_case1, auroc_case2
+    # Calculate AUROC for each case for each orchard
+    for orchard_id, orchard_data in orchard_results.items():
+        auroc_case1 = calculate_auroc(orchard_data["gt_case1"], orchard_data["pr_case1"])
+        auroc_case2 = calculate_auroc(orchard_data["gt_case2"], orchard_data["pr_case2"])
 
-def calculate_auroc(gt_list, pr_list, case_name):
+        with open("log.txt", "a") as file:
+            file.write(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}")
+
+    # Calculate AUROC overall
+    auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall)
+    return auroc_overall
+
+def calculate_auroc(gt_list, pr_list):
     if len(set(gt_list)) == 2:
         auroc = round(roc_auc_score(gt_list, pr_list), 3)
-        print(f"{case_name} AUROC: {auroc:.3f}")
         return auroc
     else:
-        print(f"Warning: Only one class present for {case_name}. ROC AUC score cannot be calculated.")
         return None
 
 def plot_sample(img, label, anomaly_score):
