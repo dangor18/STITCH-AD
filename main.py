@@ -9,6 +9,7 @@ import optuna
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
+from torchvision import transforms
 import numpy as np
 
 from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
@@ -38,33 +39,20 @@ def loss_function(a, b):
                                       b[item].view(b[item].shape[0],-1)))
     return loss
 
-def train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device):
-    """
-    Train the model for one epoch and return the average loss
-    """
-    bn.train()
-    decoder.train()
-    loss_sum = 0.0
-    num_batches = 0
-    
-    train_data = tqdm(train_loader)
-    
-    for input in train_data:
-        images = input["image"].to(device)
-        
-        inputs = encoder(images)
-        outputs = decoder(bn(inputs))
-        
-        loss = loss_function(inputs, outputs)
-        
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        
-        loss_sum += loss.item()
-        num_batches += 1
-    
-    return loss_sum / num_batches
+def loss_concat(a, b):
+    mse_loss = torch.nn.MSELoss()
+    cos_loss = torch.nn.CosineSimilarity()
+    loss = 0
+    a_map = []
+    b_map = []
+    size = a[0].shape[-1]
+    for item in range(len(a)):
+        a_map.append(F.interpolate(a[item], size=size, mode='bilinear', align_corners=True))
+        b_map.append(F.interpolate(b[item], size=size, mode='bilinear', align_corners=True))
+    a_map = torch.cat(a_map,1)
+    b_map = torch.cat(b_map,1)
+    loss += torch.mean(1-cos_loss(a_map,b_map))
+    return loss
 
 def create_model(architecture: str = "wide_resnet50_2", attention: bool = True):
     """
@@ -88,22 +76,45 @@ def create_model(architecture: str = "wide_resnet50_2", attention: bool = True):
 
 def train(params, trial=None):
     """
-    Train the model with the specified parameters and return the best overall AUROC score
+    Train the model on orchard patch data with the specified parameters and return the best overall AUROC score
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # create data loaders
     print("[INFO] LOADING DATA...")
-    train_data = CustomDataset(params["meta_path"] + "train_metadata.json", params["data_path"], None, (params["resize_x"], params["resize_y"]), noise_factor=params["noise_factor"], p=params["p"])
+    transform_fn = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=params["p"]),
+            transforms.RandomVerticalFlip(p=params["p"]),
+            #transforms.ColorJitter(brightness=0.0, contrast=0.0, saturation=0.0, hue=0.0),
+            #transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+            #transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+    ])
+    
+    train_data = CustomDataset(
+        params["meta_path"] + "train_metadata.json", 
+        params["data_path"], 
+        transform_fn, 
+        (params["resize_x"], params["resize_y"]), 
+        noise_factor=params["noise_factor"], 
+        p=params["p"]
+    )
+    
     train_loader = DataLoader(
         train_data, 
         batch_size=params["batch_size"], 
-        shuffle=True,
-        num_workers=4,
+        shuffle=False,
+        num_workers=1,
         pin_memory=True,
         persistent_workers=True
     )
-    test_data = CustomDataset(params["meta_path"] + "test_metadata.json", params["data_path"], None, (params["resize_x"], params["resize_y"]))
+
+    test_data = CustomDataset(
+        params["meta_path"] + "test_metadata.json",
+        params["data_path"], 
+        None, 
+        (params["resize_x"], params["resize_y"])
+    )
+
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
 
     encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
@@ -123,17 +134,39 @@ def train(params, trial=None):
     print("[INFO] TRAINING MODEL...")
     # train loop
     for epoch in range(params["num_epochs"]):
-        avg_loss = train_single_epoch(encoder, bn, decoder, optimizer, train_loader, device)
+        bn.train()
+        decoder.train()
+        loss_sum = 0.0
+        num_batches = 0
+        
+        train_data = tqdm(train_loader)
+        
+        for input in train_data:
+            images = input["image"].to(device)
+            
+            inputs = encoder(images)
+            outputs = decoder(bn(inputs))
+            
+            loss = loss_function(inputs, outputs)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            loss_sum += loss.item()
+            num_batches += 1
+
+        avg_loss = loss_sum / num_batches
         
         # evaluate every 10 epochs
         if (epoch + 1) % 10 == 0:
             if trial is None:
                 # write to log file
                 with open(params["log_path"], "a") as log_file:
-                    log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.4f}, OVERALL AUROC: {total_auroc:.3f}\n")
+                    log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}\n")
             
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
-            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.4f}, OVERALL AUROC: {total_auroc:.3f}")
+            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -155,11 +188,11 @@ def objective(trial):
     with open("model_config.yaml", "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
-    # set new params
+    # new param suggestions
     params["learning_rate"] = trial.suggest_loguniform("learning_rate", 1e-5, 1e-2)
     params["batch_size"] = trial.suggest_categorical("batch_size", [8, 12, 16, 20, 32])
     params["weight_decay"] = trial.suggest_uniform("weight_decay", 0, 1e-3)
-    params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"])
+    params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     params["attention"] = trial.suggest_categorical("attention", [True, False])
     params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9)
     params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
@@ -176,13 +209,12 @@ if __name__ == '__main__':
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
         study.optimize(objective, n_trials=100)
-
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
             print(f"{key}: {val}")
-        print("[INFO] BEST AUROC: ", trial.value)
-    else:
+        print(f"[INFO] BEST AUROC: {trial.value:.3f}")
+    else:   # else parameters from config file
         with open("model_config.yaml", "r") as config_file:
             params = yaml.safe_load(config_file)
         best_auroc = train(params)

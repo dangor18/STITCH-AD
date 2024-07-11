@@ -15,8 +15,8 @@ class CustomDataset(Dataset):
         meta_file,
         data_path,
         transform_fn,
-        resize_dim=None, 
-        noise_factor=0, 
+        resize_dim=None,
+        noise_factor=0,
         p=0
     ):
         self.meta_file = meta_file
@@ -25,15 +25,15 @@ class CustomDataset(Dataset):
         self.resize_dim = resize_dim
         self.noise_factor = noise_factor
         self.p = p
-        self.i= 0
-
+        self.i = 0
+        
         # construct metas
         with open(meta_file, "r") as f_r:
             self.metas = []
             for line in f_r:
                 meta = json.loads(line)
                 self.metas.append(meta)
-        
+       
         mean = [0.485, 0.456, 0.406]
         std = [0.229, 0.224, 0.225]
         self.normalize = transforms.Normalize(mean=mean, std=std)
@@ -41,59 +41,64 @@ class CustomDataset(Dataset):
     def __len__(self):
         return len(self.metas)
 
+    def plot_channels(self, image, title):
+        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig.suptitle(title)
+        for i, channel_name in enumerate(['Red', 'Green', 'Blue']):
+            axs[i].imshow(image[i].numpy(), cmap='gray')
+            axs[i].set_title(f'{channel_name} Channel')
+            axs[i].axis('off')
+        plt.tight_layout()
+        plt.show()
+
     def __getitem__(self, index):
         input = {}
         meta = self.metas[index]
-
+        
         # read image
         filename = os.path.join(self.data_path, meta["filename"])
         label = meta["label"]
-
-        image = np.load(filename)
-
+        image = np.uint8(np.load(filename))
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
-        
+
+        image = transforms.ToTensor()(image)
+        image = self.transform_fn(image)
+
         input.update(
             {
                 "filename": filename,
                 "label": label,
             }
         )
-
         if meta.get("clsname", None):
             input["clsname"] = meta["clsname"]
         else:
             input["clsname"] = filename.split("/")[-4]
-
-        image = Image.fromarray(image.squeeze(), mode="RGB")
-
-        if self.transform_fn:
-            image = self.transform_fn(image)
-
-        image = transforms.ToTensor()(image)
         
-        # cut image down to one channel
-        #image = image[0].unsqueeze(0)
-
+        #image = Image.fromarray(np.squeeze(image), mode="RGB")
+        #image.show()
+        #if self.transform_fn:
+        #    image = self.transform_fn(image)
+        
+        #image = transforms.ToTensor()(image)
+       
         if "mean" in meta and "std" in meta:
-            #mean=np.array(meta["mean"])/255
-            #std=np.array(meta["std"])/255
             image = self.normalize(image)
-        #if torch.any(image > 1) or torch.any(image < -1):
-        #    print(f"Warning: Image {filename} has values outside [-1, 1] range.")
-        #    print(f"Min value: {image.min().item()}, Max value: {image.max().item()}")
+
         input.update({"image": image})
         noisy_image = self.add_noise(image, self.noise_factor, self.p)
         input.update({"noisy_image": noisy_image})
         
+        #self.plot_channels(image, "Original Image Channels")
+        #self.plot_channels(noisy_image, "Noisy Image Channels")
+
         return input
 
     @staticmethod
     def add_noise(image, noise_factor, p):
         '''
         Function to randomly add noise to the image.
-
         Parameters:
         ----------
         img : torch.Tensor
