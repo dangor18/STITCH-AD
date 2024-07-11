@@ -196,6 +196,7 @@ def objective(trial):
     params["attention"] = trial.suggest_categorical("attention", [True, False])
     params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9)
     params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
+    params["p"] = trial.suggest_uniform("p", 0, 0.5)
 
     return train(params, trial)
 
