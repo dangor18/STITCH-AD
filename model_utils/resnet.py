@@ -1,4 +1,5 @@
 import torch
+#from torchvision.models import Wide_ResNet50_2_Weights
 from torch import Tensor
 import torch.nn as nn
 try:
@@ -32,10 +33,71 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, d
                      padding=dilation, groups=groups, bias=False, dilation=dilation)
 
 
-def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
+def conv1x1(in_planes: int, out_planes: int, stride: int = 1, bias = False) -> nn.Conv2d:
     """1x1 convolution"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=bias)
 
+
+class SEBlock(nn.Module):
+    """
+    Squeeze-and-Excitation block from 'Squeeze-and-Excitation Networks,' https://arxiv.org/abs/1709.01507.
+
+    Parameters:
+    ----------
+    channels : int
+        Number of channels.
+    reduction : int, default 16
+        Squeeze reduction value.
+    approx_sigmoid : bool, default False
+        Whether to use approximated sigmoid function.
+    activation : function, or str, or nn.Module
+        Activation function or name of activation function.
+    """
+    def __init__(
+        self,
+        in_channels,
+        out_channels = 3,
+        target_channel = 0,
+        target_weight = 1.0,
+        reduction = 16
+        ):
+        super(SEBlock, self).__init__()
+        self.target_channel = target_channel
+        self.target_weight = target_weight
+        mid_channels = in_channels // reduction
+
+        self.pool = nn.AdaptiveAvgPool2d(output_size=1)
+        # TODO: try 1x1 vs 3x3
+        self.conv1 = conv1x1(
+            in_channels=in_channels,
+            out_channels=mid_channels,
+            bias=True)
+        self.activ = nn.ReLU(inplace=True)
+        self.conv2 = conv1x1(
+            in_channels=mid_channels,
+            out_channels=out_channels,
+            bias=True)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        w = self.pool(x)
+        w = self.conv1(w)
+        w = self.activ(w)
+        w = self.conv2(w)
+        w = self.sigmoid(w)
+        w = self.pool(x)
+        w = self.conv1(w)
+        w = self.activ(w)
+        w = self.conv2(w)
+        w = self.sigmoid(w)
+
+        # apply weight to channel with DEM
+        if self.target_channel_idx < self.out_channels:
+            w[:, self.target_channel_idx, :, :] *= self.target_weight
+
+        x = x * w  # apply attention
+
+        return x
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -281,11 +343,12 @@ def _resnet(
     """
     model = ResNet(block, layers, **kwargs)
     if pretrained:
-        state_dict = load_state_dict_from_url(model_urls[arch],
-                                              progress=progress)
+        #state_dict = Wide_ResNet50_2_Weights.IMAGENET1K_V2.get_state_dict(progress=progress)
+        state_dict = load_state_dict_from_url(model_urls[arch],progress=progress)
         #for k,v in list(state_dict.items()):
         #    if 'layer4' in k or 'fc' in k:
         #        state_dict.pop(k)
+        #state_dict = {k: v for k, v in state_dict.items() if not k.startswith('fc.')}
         model.load_state_dict(state_dict)
     return model
 
