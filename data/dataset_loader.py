@@ -38,12 +38,9 @@ class CustomDataset(Dataset):
         
         if self.norm_choice == "IMAGE_NET":
             self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            print("[INFO] NORMALIZATION TYPE: IMAGE_NET")
         elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
             self.normalize = transforms.Normalize(mean=np.array(meta["mean"])/255.0, std=np.array(meta["std"])/255.0)
-            print("[INFO] NORMALIZATION TYPE: PER ORCHARD")
         else:
-            print("[WARNING] NO NORMALIZATION TYPE FOUND.")
             self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
     def __len__(self):

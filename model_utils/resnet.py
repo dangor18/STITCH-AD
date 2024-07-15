@@ -37,6 +37,68 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1, bias = False) -> n
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=bias)
 
+class ChannelAttention(nn.Module):
+    def __init__(self, in_planes, ratio=16):
+        super(ChannelAttention, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc1 = nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = self.fc2(self.relu1(self.fc1(self.avg_pool(x))))
+        max_out = self.fc2(self.relu1(self.fc1(self.max_pool(x))))
+        out = avg_out + max_out
+        return self.sigmoid(out)
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size=7):
+        super(SpatialAttention, self).__init__()
+        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x = torch.cat([avg_out, max_out], dim=1)
+        x = self.conv1(x)
+        return self.sigmoid(x)
+
+class CBAM(nn.Module):
+    def __init__(self, channels, ratio=16, kernel_size=7):
+        super(CBAM, self).__init__()
+        self.ca = ChannelAttention(channels, ratio)
+        self.sa = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = x * self.ca(x)
+        x = x * self.sa(x)
+        return x
+    
+class ChannelReductionCBAM(nn.Module):
+    def __init__(self, in_channels, out_channels=3, ratio=16, kernel_size=7, emphasis_channel=0, weight=1):
+        super(ChannelReductionCBAM, self).__init__()
+        self.reduction = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
+        self.emphasis_channel = emphasis_channel
+        
+        self.ca = ChannelAttention(out_channels, ratio)
+        self.sa = SpatialAttention(kernel_size)
+        
+        # Initialize the emphasis weights
+        self.emphasis_weights = nn.Parameter(torch.ones(out_channels))
+        self.emphasis_weights.data[emphasis_channel] *= weight
+        
+    def forward(self, x):
+        x = self.reduction(x)
+        
+        # Apply channel emphasis
+        x = x * self.emphasis_weights.view(1, -1, 1, 1)
+        
+        x = x * self.ca(x)
+        x = x * self.sa(x)
+        return x
 
 class SEBlock(nn.Module):
     """
@@ -69,14 +131,14 @@ class SEBlock(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(output_size=1)
         # TODO: try 1x1 vs 3x3
         self.conv1 = conv1x1(
-            in_channels=in_channels,
-            out_channels=mid_channels,
-            bias=True)
-        self.activ = nn.ReLU(inplace=True)
+            in_planes=in_channels,
+            out_planes=mid_channels,
+            bias=False)
+        self.activ = nn.ReLU(inplace=False)
         self.conv2 = conv1x1(
-            in_channels=mid_channels,
-            out_channels=out_channels,
-            bias=True)
+            in_planes=mid_channels,
+            out_planes=out_channels,
+            bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -92,10 +154,10 @@ class SEBlock(nn.Module):
         w = self.sigmoid(w)
 
         # apply weight to channel with DEM
-        if self.target_channel_idx < self.out_channels:
-            w[:, self.target_channel_idx, :, :] *= self.target_weight
+        w_adjusted = w.clone()
+        w_adjusted[:, self.target_channel, :, :] = w[:, self.target_channel, :, :] * self.target_weight
 
-        x = x * w  # apply attention
+        x = x * w_adjusted  # apply attention
 
         return x
 
@@ -313,6 +375,7 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
+        #temp = x.clone()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -478,11 +541,14 @@ class AttnBottleneck(nn.Module):
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
-        self.cbam = GLEAM(planes * self.expansion, 16)
+        self.cbam = CBAM(inplanes, 16)
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x: Tensor) -> Tensor:
+        if self.attention:
+            x = self.cbam(x)
+
         identity = x
 
         out = self.conv1(x)
@@ -495,9 +561,6 @@ class AttnBottleneck(nn.Module):
 
         out = self.conv3(out)
         out = self.bn3(out)
-
-        if self.attention:
-            out = self.cbam(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)

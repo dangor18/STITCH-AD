@@ -10,10 +10,11 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast, GradScaler
 from torchvision import transforms
 import numpy as np
 
-from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
+from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, ChannelReductionCBAM
 from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2
 from model_utils.test import evaluation
 
@@ -30,7 +31,7 @@ def setup_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
 
 def loss_function(a, b, weights):
     cos_loss = torch.nn.CosineSimilarity()
@@ -82,6 +83,7 @@ def train_tuning(params, trial):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_loader, test_loader = get_loaders(params)
     
+    #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
     encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
     encoder = encoder.to(device)
     bn = bn.to(device)
@@ -108,16 +110,11 @@ def train_tuning(params, trial):
             
             inputs = encoder(images)
             outputs = decoder(bn(inputs))
-            loss = loss_function(inputs, outputs, weights=[params.get("weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+            loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
             
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            
-            loss_sum += loss.item()
-            num_batches += 1
-
-        avg_loss = loss_sum / num_batches
         
         # evaluate every 10 epochs
         if (epoch + 1) % 10 == 0:
@@ -137,18 +134,22 @@ def train_normal(params, train_loader, test_loader, device):
     """
     Train the model (without hyperparameter) tuning on orchard patch data with the specified parameters and return the best overall AUROC score
     """
+    #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
     encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
     decoder = decoder.to(device)
 
+    # nb add params here for pre_conv
     optimizer = torch.optim.Adam(
         list(decoder.parameters()) + list(bn.parameters()), 
         lr=params["learning_rate"], 
         betas=(params.get("beta1", 0.5), params.get("beta2", 0.999)),
         weight_decay=params["weight_decay"]
     )
+
+    scaler = GradScaler()
 
     best_auroc = 0
     print("[INFO] TRAINING MODEL...")
@@ -163,35 +164,36 @@ def train_normal(params, train_loader, test_loader, device):
 
         for input in train_data:
             images = input["image"].to(device)
-            
-            inputs = encoder(images)
-            outputs = decoder(bn(inputs))
-            loss = loss_function(inputs, outputs, weights=[params.get("weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+            with autocast():
+                inputs = encoder(images)
+                outputs = decoder(bn(inputs))
+                loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
             
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            #loss.backward()
+            #optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             loss_sum += loss.item()
             num_batches += 1
 
         avg_loss = loss_sum / num_batches
-    
+        
+        print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}")
+        with open(params["log_path"], "a") as log_file:
+            log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         # evaluate every 10 epochs
         if (epoch + 1) % 10 == 0:
-            # write to log file
-            with open(params["log_path"], "a") as log_file:
-                log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
-            
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"])
+            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], params.get("low_weight", 1))
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
-                if trial is None:  # don't save during parameter tuning
-                    # save model
-                    print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
-                    torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
+                # save model
+                print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
+                torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
 
     return best_auroc
 
@@ -247,7 +249,8 @@ def objective(trial):
     params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
     #params["p"] = trial.suggest_uniform("p", 0, 0.5)
     params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    params["weight"] = trial.suggest_uniform("weight", 1, 2)
+    params["low_weight"] = trial.suggest_uniform("low_weight", 1, 2)
+    params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)
 
@@ -264,11 +267,15 @@ if __name__ == '__main__':
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
         study.optimize(objective, n_trials=100)
-        print("[INFO] BEST HYPERPARAMETERS:")
+        #print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
-            print(f"{key}: {val}")
-        print(f"[INFO] BEST AUROC: {trial.value:.3f}")
+            #print(f"{key}: {val}")
+            with open("logs/hypertuning.txt") as file:
+                file.write(f"{key}: {val}")
+        with open("logs/hypertuning.txt") as file:
+                file.write(f"[INFO] BEST AUROC: {trial.value:.3f}")
+        #print(f"[INFO] BEST AUROC: {trial.value:.3f}")
     else:   # else parameters from config file
         with open("model_config.yaml", "r") as config_file:
             params = yaml.safe_load(config_file)

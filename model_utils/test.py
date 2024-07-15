@@ -23,11 +23,12 @@ import matplotlib
 import pickle
 from collections import defaultdict
 
-def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
+def cal_anomaly_map(fs_list, ft_list, out_size=224, low_weight = 1, amap_mode='mul'):
     """
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer
     """
+    weights = [low_weight] + [1 for _ in range(len(fs_list) - 1)]
     if amap_mode == 'mul':
         anomaly_map = np.ones([out_size, out_size])
     else:
@@ -39,7 +40,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
         ft = ft_list[i]
         #fs_norm = F.normalize(fs, p=2)
         #ft_norm = F.normalize(ft, p=2)
-        a_map = 1 - F.cosine_similarity(fs, ft)
+        a_map = weights[i]*(1 - F.cosine_similarity(fs, ft))
         a_map = torch.unsqueeze(a_map, dim=1)
         a_map = F.interpolate(a_map, size=out_size, mode='bilinear', align_corners=True)
         a_map = a_map[0, 0, :, :].to('cpu').detach().numpy()
@@ -65,7 +66,7 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, plot_results=False, n_plot_per_class=5):
+def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, low_weight = 1, plot_results=False, n_plot_per_class=5):
     """
     Evaluate the model for multiple anomaly types
     """
@@ -93,7 +94,8 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, plot_
 
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
+            print(low_weight)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], low_weight, amap_mode='a')
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map)
@@ -134,15 +136,11 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, plot_
         with open(log_path, "a") as file:
             file.write("\n=== EVALUATION ===")
     
-    print(orchard_auroc_results)
     for orchard_id, orchard_data in orchard_auroc_results.items():
-        print(orchard_id, orchard_data["gt_case1"], orchard_data["pr_case1"])
         auroc_case1 = calculate_auroc(orchard_data["gt_case1"], orchard_data["pr_case1"])
-        print(auroc_case1)
         auroc_case2 = calculate_auroc(orchard_data["gt_case2"], orchard_data["pr_case2"])
-        print(orchard_id, orchard_data["gt_total"], orchard_data["pr_total"])
         auroc_total = calculate_auroc(orchard_data["gt_total"], orchard_data["pr_total"])
-        print(auroc_total)
+
         average_auroc += auroc_total
         orchard_count += 1
 
@@ -150,7 +148,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, plot_
         orchard_anomaly_scores[orchard_id]["case_2"] = round(orchard_anomaly_scores[orchard_id]["case_2"][0] / orchard_anomaly_scores[orchard_id]["case_2"][1], 3) if orchard_anomaly_scores[orchard_id]["case_2"][1] > 0 else None
         orchard_anomaly_scores[orchard_id]["normal"] = round(orchard_anomaly_scores[orchard_id]["normal"][0] / orchard_anomaly_scores[orchard_id]["normal"][1], 3)
         if log_path:
-            with open("log.txt", "a") as file:
+            with open(log_path, "a") as file:
                 file.write(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, OVERALL: {auroc_total}")
                 file.write(f"\n+ SCORES: N: {orchard_anomaly_scores[orchard_id]['normal']}, C1: {orchard_anomaly_scores[orchard_id]['case_1']}, C2: {orchard_anomaly_scores[orchard_id]['case_2']}")
 
@@ -158,7 +156,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, plot_
     #auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall)
     average_auroc = average_auroc / orchard_count
     if log_path:
-        with open("log.txt", "a") as file:
+        with open(log_path, "a") as file:
             file.write(f"\n= Average AUROC: {round(average_auroc, 3)}")
     return average_auroc
 

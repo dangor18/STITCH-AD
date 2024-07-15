@@ -198,6 +198,15 @@ class ResNet(nn.Module):
         #                               dilate=replace_stride_with_dilation[2])
         #self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         #self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.final_conv = nn.Sequential(
+            deconv2x2(64 * block.expansion, 128, 2),
+            norm_layer(128),
+            nn.ReLU(inplace=True),
+            deconv2x2(128, 64, 2),
+            norm_layer(64),
+            nn.ReLU(inplace=True),
+            conv3x3(64, 3)
+        )
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -252,6 +261,7 @@ class ResNet(nn.Module):
         feature_b = self.layer2(feature_a)  # 256*16*16->128*32*32
         feature_c = self.layer3(feature_b)  # 128*32*32->64*64*64
         #feature_d = self.layer4(feature_c)  # 64*64*64->128*32*32
+        #feature_d = self.final_conv(feature_c)
 
         #x = self.avgpool(feature_d)
         #x = torch.flatten(x, 1)
