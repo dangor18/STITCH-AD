@@ -160,7 +160,7 @@ def train_normal(params, train_loader, test_loader, device):
         num_batches = 0
         
         train_data = tqdm(train_loader)
-        
+
         for input in train_data:
             images = input["image"].to(device)
             
@@ -176,30 +176,30 @@ def train_normal(params, train_loader, test_loader, device):
             num_batches += 1
 
         avg_loss = loss_sum / num_batches
-        
+    
         # evaluate every 10 epochs
         if (epoch + 1) % 10 == 0:
             # write to log file
             with open(params["log_path"], "a") as log_file:
-                log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}\n")
+                log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
             
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
+            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"])
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
                 if trial is None:  # don't save during parameter tuning
                     # save model
-                    print("[INFO] NEW BEST. SAVING MODEL...")
+                    print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
                     torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
 
     return best_auroc
 
 def get_loaders(params):
     transform_fn = transforms.Compose([
-                transforms.RandomHorizontalFlip(p=params["p"]),
-                transforms.RandomVerticalFlip(p=params["p"]),
-                #transforms.ColorJitter(brightness=0.0, contrast=0.0, saturation=0.0, hue=0.0),
+                transforms.RandomHorizontalFlip(p=params["p_flip"]),
+                transforms.RandomVerticalFlip(p=params["p_flip"]),
+                #transforms.ColorJitter(brightness=0.0, contrast=params["contrast"], saturation=0.0, hue=0.0),
                 #transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
                 #transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
     ])  
@@ -209,7 +209,8 @@ def get_loaders(params):
             transform_fn, 
             (params["resize_x"], params["resize_y"]), 
             noise_factor=params["noise_factor"], 
-            p=params["p"]
+            p=params["p_flip"],
+            norm_choice=params["norm_choice"]
         )
     train_loader = DataLoader(
             train_data, 
@@ -223,7 +224,8 @@ def get_loaders(params):
             params["meta_path"] + "test_metadata.json",
             params["data_path"], 
             None, 
-            (params["resize_x"], params["resize_y"])
+            (params["resize_x"], params["resize_y"]),
+            norm_choice=params["norm_choice"]
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     
@@ -243,7 +245,8 @@ def objective(trial):
     params["attention"] = trial.suggest_categorical("attention", [True, False])
     params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9)
     params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
-    params["p"] = trial.suggest_uniform("p", 0, 0.5)
+    #params["p"] = trial.suggest_uniform("p", 0, 0.5)
+    params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
     params["weight"] = trial.suggest_uniform("weight", 1, 2)
 
     return train_tuning(params, trial)
@@ -252,6 +255,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     args = parser.parse_args()
+
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("checkpoints", exist_ok=True)
 
     # tune with optuna or train with default parameters from config file
     if args.tune is True:

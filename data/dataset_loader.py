@@ -17,7 +17,8 @@ class CustomDataset(Dataset):
         transform_fn,
         resize_dim=None,
         noise_factor=0,
-        p=0
+        p=0, 
+        norm_choice = "IMAGE_NET"
     ):
         self.meta_file = meta_file
         self.data_path = data_path
@@ -25,6 +26,7 @@ class CustomDataset(Dataset):
         self.resize_dim = resize_dim
         self.noise_factor = noise_factor
         self.p = p
+        self.norm_choice = norm_choice
         self.i = 0
         
         # construct metas
@@ -33,10 +35,16 @@ class CustomDataset(Dataset):
             for line in f_r:
                 meta = json.loads(line)
                 self.metas.append(meta)
-       
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
-        self.normalize = transforms.Normalize(mean=mean, std=std)
+        
+        if self.norm_choice == "IMAGE_NET":
+            self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            print("[INFO] NORMALIZATION TYPE: IMAGE_NET")
+        elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
+            self.normalize = transforms.Normalize(mean=np.array(meta["mean"])/255.0, std=np.array(meta["std"])/255.0)
+            print("[INFO] NORMALIZATION TYPE: PER ORCHARD")
+        else:
+            print("[WARNING] NO NORMALIZATION TYPE FOUND.")
+            self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
     def __len__(self):
         return len(self.metas)
@@ -58,12 +66,15 @@ class CustomDataset(Dataset):
         # read image
         filename = os.path.join(self.data_path, meta["filename"])
         label = meta["label"]
-        image = np.uint8(np.load(filename))
+        image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        image = transforms.ToTensor()(image)
-        image = self.transform_fn(image)
+        image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
+        #image = transforms.ToTensor()(image)
+
+        if self.transform_fn:
+            image = self.transform_fn(image)
 
         input.update(
             {
@@ -75,16 +86,9 @@ class CustomDataset(Dataset):
             input["clsname"] = meta["clsname"]
         else:
             input["clsname"] = filename.split("/")[-4]
-        
-        #image = Image.fromarray(np.squeeze(image), mode="RGB")
-        #image.show()
-        #if self.transform_fn:
-        #    image = self.transform_fn(image)
-        
-        #image = transforms.ToTensor()(image)
        
-        if "mean" in meta and "std" in meta:
-            image = self.normalize(image)
+        # normalize
+        image = self.normalize(image)
 
         input.update({"image": image})
         noisy_image = self.add_noise(image, self.noise_factor, self.p)
