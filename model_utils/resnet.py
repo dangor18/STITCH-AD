@@ -26,7 +26,6 @@ model_urls = {
     'wide_resnet101_2': 'https://download.pytorch.org/models/wide_resnet101_2-32ee1156.pth',
 }
 
-
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -281,7 +280,8 @@ class ResNet(nn.Module):
         groups: int = 1,
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
-        norm_layer: Optional[Callable[..., nn.Module]] = None
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        in_channels: int = 3
     ) -> None:
         super(ResNet, self).__init__()
         if norm_layer is None:
@@ -301,7 +301,7 @@ class ResNet(nn.Module):
         self.groups = groups
         self.base_width = width_per_group
 
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(in_channels, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
@@ -399,15 +399,22 @@ def _resnet(
     layers: List[int],
     pretrained: bool,
     progress: bool,
+    in_channels: int,
     **kwargs: Any
 ) -> ResNet:
     """
     Constructs a ResNet model for the specified architecture. If pretrained is True then loads IMAGENET weights.
     """
-    model = ResNet(block, layers, **kwargs)
+    model = ResNet(block, layers, in_channels=in_channels, **kwargs)
     if pretrained:
         #state_dict = Wide_ResNet50_2_Weights.IMAGENET1K_V2.get_state_dict(progress=progress)
         state_dict = load_state_dict_from_url(model_urls[arch],progress=progress)
+        if in_channels == 1:
+            original_conv1_weight = state_dict['conv1.weight']
+            new_conv1_weight = original_conv1_weight.sum(dim=1, keepdim=True)
+            new_conv1_weight = new_conv1_weight / 3.0  # Average the channels
+        
+            state_dict['conv1.weight'] = new_conv1_weight
         #for k,v in list(state_dict.items()):
         #    if 'layer4' in k or 'fc' in k:
         #        state_dict.pop(k)
@@ -675,14 +682,14 @@ def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
                    **kwargs), BN_layer(AttnBasicBlock,3,**kwargs)
 
 
-def resnet50(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
+def resnet50(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet50', Bottleneck, [3, 4, 6, 3], pretrained, progress,
+    return _resnet('resnet50', Bottleneck, [3, 4, 6, 3], pretrained, progress, in_channels,
                    **kwargs), BN_layer(AttnBottleneck,3,attention=attention, **kwargs)
 
 
@@ -734,7 +741,7 @@ def resnext101_32x8d(pretrained: bool = False, progress: bool = True, **kwargs: 
                    pretrained, progress, **kwargs)
 
 
-def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
+def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-50-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels
@@ -747,10 +754,10 @@ def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: 
     """
     kwargs['width_per_group'] = 64 * 2
     # NOTE: returns the model AND the BN_layer
-    return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3, attention=attention, **kwargs)
+    return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, in_channels, **kwargs), BN_layer(AttnBottleneck,3, attention=attention, **kwargs)
 
 
-def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention: bool = True, **kwargs: Any) -> ResNet:
+def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-101-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels
@@ -763,6 +770,6 @@ def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention:
     """
     kwargs['width_per_group'] = 64 * 2
     return _resnet('wide_resnet101_2', Bottleneck, [3, 4, 23, 3],
-                   pretrained, progress, **kwargs), BN_layer(AttnBottleneck,3,attention=attention, **kwargs)
+                   pretrained, progress, in_channels, **kwargs), BN_layer(AttnBottleneck,3,attention=attention, **kwargs)
 
 

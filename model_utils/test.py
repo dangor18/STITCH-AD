@@ -94,7 +94,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, low_w
 
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
-            print(low_weight)
+
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], low_weight, amap_mode='a')
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            

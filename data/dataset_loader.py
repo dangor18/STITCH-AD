@@ -49,7 +49,7 @@ class CustomDataset(Dataset):
     def plot_channels(self, image, title):
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title)
-        for i, channel_name in enumerate(['Red', 'Green', 'Blue']):
+        for i, channel_name in enumerate(['Red']):
             axs[i].imshow(image[i].numpy(), cmap='gray')
             axs[i].set_title(f'{channel_name} Channel')
             axs[i].axis('off')
@@ -67,8 +67,18 @@ class CustomDataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
+        #print(np.shape(image))
+        #image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
+        if np.ndim(image) == 2:
+            image = torch.unsqueeze(torch.from_numpy(image).float() / 255.0, dim=0)
+        else:
+            image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0
+        #image = torch.squeeze(image)
         #image = transforms.ToTensor()(image)
+
+        #image = Image.fromarray(image, mode='RGB')
+        #image = transforms.ToTensor()(image)
+        #print(image)
 
         if self.transform_fn:
             image = self.transform_fn(image)
@@ -86,11 +96,9 @@ class CustomDataset(Dataset):
        
         # normalize
         image = self.normalize(image)
-
         input.update({"image": image})
         noisy_image = self.add_noise(image, self.noise_factor, self.p)
         input.update({"noisy_image": noisy_image})
-        
         #self.plot_channels(image, "Original Image Channels")
         #self.plot_channels(noisy_image, "Noisy Image Channels")
 

@@ -57,7 +57,7 @@ def process_folder(folder_path, process_func):
         list(executor.map(process_file, args))
 
 def main():
-    root_dir = 'data/chunks/'
+    root_dir = 'data/dem_chunks/'
     orchards = [orchard for orchard in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, orchard))]
 
     for orchard in orchards:

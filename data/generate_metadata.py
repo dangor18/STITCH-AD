@@ -3,7 +3,7 @@ import json
 import numpy as np
 
 # Set the root directory where your dataset is located
-root_dir = "data/chunks"
+root_dir = "data/dem_chunks"
 
 # Define the class names and their corresponding labels
 class_labels = {

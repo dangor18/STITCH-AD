@@ -23,7 +23,7 @@ from data.dataset_loader import CustomDataset
 from tqdm import tqdm
 
 # ignore deprecation warnings
-warnings.filterwarnings('ignore')
+#warnings.filterwarnings('ignore')
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -56,25 +56,45 @@ def loss_concat(a, b):
     loss += torch.mean(1-cos_loss(a_map,b_map))
     return loss
 
-def create_model(architecture: str = "wide_resnet50_2", attention: bool = True):
+def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
     """
     Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
     """
     if architecture == "wide_resnet50_2":
-        encoder, bn = wide_resnet50_2(pretrained=True, attention=attention)
+        encoder, bn = wide_resnet50_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet50_2(pretrained=False)
     elif architecture == "resnet50":
-        encoder, bn = resnet50(pretrained=True, attention=attention)
+        encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_resnet50(pretrained=False)
     elif architecture == "wide_resnet101_2":
-        encoder, bn = wide_resnet101_2(pretrained=True, attention=attention)
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet101_2(pretrained=False)
     elif architecture == "asym":
-        encoder, bn = wide_resnet101_2(pretrained=True, attention=attention)
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet50_2(pretrained=False)
     else:
         raise ValueError(f"Unknown model architecture: {architecture}")
     return encoder, bn, decoder
+
+def get_optimizer(config, model_params = None):
+    if str(config.get("optimizer", None)).upper() == "ADAM":
+        return torch.optim.Adam(
+            model_params, 
+            lr=config["learning_rate"], 
+            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
+            weight_decay=config["weight_decay"]
+        )
+    elif str(config.get("optimizer", None)).upper() == "SGD":
+        return torch.optim.SGD(
+            model_params,
+            lr=config["learning_rate"],
+            momentum=config["momentum"],
+            weight_decay=config["weight_decay"],
+            dampening=config.get("dampening", 0),
+        )
+    else:
+        print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
+        return None
 
 def train_tuning(params, trial):
     """
@@ -84,49 +104,58 @@ def train_tuning(params, trial):
     train_loader, test_loader = get_loaders(params)
     
     #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
-    encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
+    encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
     decoder = decoder.to(device)
 
-    optimizer = torch.optim.Adam(
-        list(decoder.parameters()) + list(bn.parameters()), 
-        lr=params["learning_rate"], 
-        betas=(params.get("beta1", 0.5), params.get("beta2", 0.999)),
-        weight_decay=params["weight_decay"]
+    optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
+    
+    # lr scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='max',
+        factor=params["lr_factor"],
+        patience=3,
+        verbose=True
     )
+
+    scaler = GradScaler()
 
     best_auroc = 0
     # train loop
     for epoch in range(params["num_epochs"]):
         bn.train()
         decoder.train()
-        loss_sum = 0.0
-        num_batches = 0
         
         for input in train_loader:
             images = input["image"].to(device)
-            
-            inputs = encoder(images)
-            outputs = decoder(bn(inputs))
-            loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+            with autocast():
+                inputs = encoder(images)
+                outputs = decoder(bn(inputs))
+                loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
             
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            #loss.backward()
+            #optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 3 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
             
-            if trial:  # prune training if necessary (bad params)
-                trial.report(total_auroc, epoch)
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
+            scheduler.step(total_auroc)
+
+            # prune training if necessary (bad params)
+            trial.report(total_auroc, epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
 
     return best_auroc
 
@@ -135,18 +164,20 @@ def train_normal(params, train_loader, test_loader, device):
     Train the model (without hyperparameter) tuning on orchard patch data with the specified parameters and return the best overall AUROC score
     """
     #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
-    encoder, bn, decoder = create_model(params["architecture"], attention=params["attention"])
+    encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
     decoder = decoder.to(device)
-
-    # nb add params here for pre_conv
-    optimizer = torch.optim.Adam(
-        list(decoder.parameters()) + list(bn.parameters()), 
-        lr=params["learning_rate"], 
-        betas=(params.get("beta1", 0.5), params.get("beta2", 0.999)),
-        weight_decay=params["weight_decay"]
+ 
+    optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
+    # lr scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='max',
+        factor=params["lr_factor"],
+        patience=3,
+        verbose=True
     )
 
     scaler = GradScaler()
@@ -194,6 +225,8 @@ def train_normal(params, train_loader, test_loader, device):
                 # save model
                 print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
                 torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
+            
+            scheduler.step(total_auroc)
 
     return best_auroc
 
@@ -206,28 +239,28 @@ def get_loaders(params):
                 #transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
     ])  
     train_data = CustomDataset(
-            params["meta_path"] + "train_metadata.json", 
-            params["data_path"], 
-            transform_fn, 
-            (params["resize_x"], params["resize_y"]), 
-            noise_factor=params["noise_factor"], 
-            p=params["p_flip"],
-            norm_choice=params["norm_choice"]
-        )
+        params["meta_path"] + "train_metadata.json", 
+        params["data_path"], 
+        transform_fn, 
+        (params["resize_x"], params["resize_y"]), 
+        noise_factor=params["noise_factor"], 
+        p=params["p_flip"],
+        norm_choice=params["norm_choice"]
+    )
     train_loader = DataLoader(
-            train_data, 
-            batch_size=params["batch_size"], 
-            shuffle=True,
-            num_workers=4,
-            pin_memory=True,
-            persistent_workers=True
+        train_data, 
+        batch_size=params["batch_size"], 
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True
     )
     test_data = CustomDataset(
-            params["meta_path"] + "test_metadata.json",
-            params["data_path"], 
-            None, 
-            (params["resize_x"], params["resize_y"]),
-            norm_choice=params["norm_choice"]
+        params["meta_path"] + "test_metadata.json",
+        params["data_path"], 
+        None, 
+        (params["resize_x"], params["resize_y"]),
+        norm_choice=params["norm_choice"]
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     
@@ -236,28 +269,36 @@ def get_loaders(params):
 # objective function for optuna
 def objective(trial):
     # open config
-    with open("model_config.yaml", "r") as ymlfile:
+    with open("configs\model_config.yaml", "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
     # new param suggestions
     params["learning_rate"] = trial.suggest_loguniform("learning_rate", 1e-5, 1e-2)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 12, 16, 20, 32])
+    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 12, 16])
     params["weight_decay"] = trial.suggest_uniform("weight_decay", 0, 1e-3)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    params["attention"] = trial.suggest_categorical("attention", [True, False])
-    params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9)
-    params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.999)
-    #params["p"] = trial.suggest_uniform("p", 0, 0.5)
-    params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
+    params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
+    params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "SGD"])
+    if params["optimizer"] == "ADAM":
+        params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9999)
+        params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.9999)
+    elif params["optimizer"] == "SGD":
+        params["momentum"] = trial.suggest_uniform("momentum", 0.0, 0.99)
+    #params["p_flip"] = trial.suggest_uniform("p_flip", 0, 0.5)
+    #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
     params["low_weight"] = trial.suggest_uniform("low_weight", 1, 2)
-    params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
+    params["lr_factor"] = trial.suggest_uniform("lr_factor", 0, 0.6)
+    #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--config", default="configs\model_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     args = parser.parse_args()
+
+    config = args.config
 
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
@@ -266,7 +307,7 @@ if __name__ == '__main__':
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=15)
         #print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
@@ -277,10 +318,16 @@ if __name__ == '__main__':
                 file.write(f"[INFO] BEST AUROC: {trial.value:.3f}")
         #print(f"[INFO] BEST AUROC: {trial.value:.3f}")
     else:   # else parameters from config file
-        with open("model_config.yaml", "r") as config_file:
+        with open(config, "r") as config_file:
             params = yaml.safe_load(config_file)
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if torch.cuda.is_available():
+            print(f"CUDA Version: {torch.version.cuda}")
+            print(f"Device: {torch.cuda.get_device_name(0)}")
+            print(f"Device Capability: {torch.cuda.get_device_capability(0)}")
+            print(f"Current Device: {torch.cuda.current_device()}")
+            print(f"Device Count: {torch.cuda.device_count()}")
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")

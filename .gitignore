@@ -1,5 +1,5 @@
-venv
-testenv
+*env*/
+*env*
 mvtec
 checkpoints
 __pycache__
@@ -9,4 +9,5 @@ chunks
 *.yaml
 *.npy
 *.pth
-log.txt
+*.json
+logs

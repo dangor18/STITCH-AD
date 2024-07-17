@@ -302,14 +302,6 @@ def test_upscaling(files, upscale_width, upscale_height, output_dir):
                 dst.write(data)
                 dst.colorinterp = color_interps
 
-def get_files_from_project(project_dir: str) -> list[str]:
-    return [project_dir + '/orthos/' + f for f in [
-        'data-analysis/lwir.tif',
-        'data-analysis/red.tif',
-        'data-analysis/reg.tif',
-        'export-data/orthomosaic_visible.tif'
-    ]]
-
 def main():
     parser = argparse.ArgumentParser(description="A tool for chunking large orthomosaic TIF files into smaller patches.")
     parser.add_argument("-v", "--verbose", action="store_true", help="enable verbose output")
