@@ -1,5 +1,5 @@
-data_path: /scratch/grddan017/R/data/chunks/DNR/
-meta_path: /scratch/grddan017/R/data/chunks/DNR/metadata/
+data_path: /scratch/grddan017/R/chunks/DNR/
+meta_path: /scratch/grddan017/R/chunks/DNR/metadata/
 log_path: logs/NewScale3.txt
 p_flip: 0.3
 noise_factor: 0
