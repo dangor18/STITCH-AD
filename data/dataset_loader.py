@@ -39,7 +39,7 @@ class CustomDataset(Dataset):
         if self.norm_choice == "IMAGE_NET":
             self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
-            self.normalize = transforms.Normalize(mean=np.array(meta["mean"])/255.0, std=np.array(meta["std"])/255.0)
+            self.normalize = transforms.Normalize(mean=np.array(meta["mean"])/255.0, std=np.array(meta["std"]))
         else:
             self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
@@ -70,9 +70,9 @@ class CustomDataset(Dataset):
         #print(np.shape(image))
         #image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
         if np.ndim(image) == 2:
-            image = torch.unsqueeze(torch.from_numpy(image).float() / 255.0, dim=0)
+            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
         else:
-            image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0
+            image = torch.from_numpy(image).float().permute(2, 0, 1)
         #image = torch.squeeze(image)
         #image = transforms.ToTensor()(image)
 

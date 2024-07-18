@@ -37,7 +37,7 @@ def loss_function(a, b, weights):
     cos_loss = torch.nn.CosineSimilarity()
     loss = 0
     for item in range(len(a)):
-        loss += weights[item] * torch.mean(1-cos_loss(a[item].view(a[item].shape[0],-1),
+        loss += torch.mean(1-cos_loss(a[item].view(a[item].shape[0],-1),
                                       b[item].view(b[item].shape[0],-1)))
     return loss
 
@@ -117,7 +117,7 @@ def train_tuning(params, trial):
         optimizer, 
         mode='max',
         factor=params["lr_factor"],
-        patience=3,
+        patience=params["patience"],
         verbose=True
     )
 
@@ -143,7 +143,7 @@ def train_tuning(params, trial):
             scaler.step(optimizer)
             scaler.update()
         
-        # evaluate every 10 epochs
+        # evaluate every 3 epochs
         if (epoch + 1) % 3 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
             
@@ -176,7 +176,7 @@ def train_normal(params, train_loader, test_loader, device):
         optimizer, 
         mode='max',
         factor=params["lr_factor"],
-        patience=3,
+        patience=params["patience"],
         verbose=True
     )
 
@@ -230,6 +230,96 @@ def train_normal(params, train_loader, test_loader, device):
 
     return best_auroc
 
+import cProfile
+import pstats
+import io
+
+def train_profile_cprofile(params, train_loader, test_loader, device):
+    """
+    Train the model with cProfile for performance profiling
+    """
+    def train():
+        encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
+        encoder = encoder.to(device)
+        bn = bn.to(device)
+        encoder.eval()
+        decoder = decoder.to(device)
+
+        optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, 
+            mode='max',
+            factor=params["lr_factor"],
+            patience=params["patience"],
+            verbose=True
+        )
+
+        scaler = GradScaler()
+
+        best_auroc = 0
+        print("[INFO] TRAINING MODEL WITH CPROFILE...")
+
+        for epoch in range(params["num_epochs"]):
+            bn.train()
+            decoder.train()
+            loss_sum = 0.0
+            num_batches = 0
+            
+            train_data = tqdm(train_loader)
+
+            for input in train_data:
+                images = input["image"].to(device)
+                
+                with autocast():
+                    inputs = encoder(images)
+                    outputs = decoder(bn(inputs))
+                    loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+
+                loss_sum += loss.item()
+                num_batches += 1
+
+            avg_loss = loss_sum / num_batches
+            
+            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}")
+            with open(params["log_path"], "a") as log_file:
+                log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
+
+            if (epoch + 1) % 10 == 0:
+                total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], params.get("low_weight", 1))
+                print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
+                
+                if total_auroc > best_auroc:
+                    best_auroc = total_auroc
+                    print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
+                    torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
+                
+                scheduler.step(total_auroc)
+
+        print("[INFO] TRAINING COMPLETE.")
+        return best_auroc
+
+    # Run the training function with cProfile
+    profiler = cProfile.Profile()
+    best_auroc = profiler.runcall(train)
+
+    # Print the profiling results
+    s = io.StringIO()
+    ps = pstats.Stats(profiler, stream=s).sort_stats('cumulative')
+    ps.print_stats()
+    print(s.getvalue())
+
+    # Optionally, save the profiling results to a file
+    with open('profile_results.txt', 'w') as f:
+        ps = pstats.Stats(profiler, stream=f).sort_stats('cumulative')
+        ps.print_stats()
+
+    return best_auroc
+
 def get_loaders(params):
     transform_fn = transforms.Compose([
                 transforms.RandomHorizontalFlip(p=params["p_flip"]),
@@ -273,21 +363,22 @@ def objective(trial):
         params = yaml.safe_load(ymlfile)
 
     # new param suggestions
-    params["learning_rate"] = trial.suggest_loguniform("learning_rate", 1e-5, 1e-2)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 12, 16])
-    params["weight_decay"] = trial.suggest_uniform("weight_decay", 0, 1e-3)
+    params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
+    params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
+    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 16, 24, 32, 64])
+    params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
-    params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "SGD"])
-    if params["optimizer"] == "ADAM":
-        params["beta1"] = trial.suggest_uniform("beta1", 0.5, 0.9999)
-        params["beta2"] = trial.suggest_uniform("beta2", 0.9, 0.9999)
-    elif params["optimizer"] == "SGD":
-        params["momentum"] = trial.suggest_uniform("momentum", 0.0, 0.99)
-    #params["p_flip"] = trial.suggest_uniform("p_flip", 0, 0.5)
-    #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    params["low_weight"] = trial.suggest_uniform("low_weight", 1, 2)
-    params["lr_factor"] = trial.suggest_uniform("lr_factor", 0, 0.6)
+    #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "SGD"])
+    if str(params["optimizer"]).upper() == "ADAM":
+        params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+        params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
+    elif str(params["optimizer"]).upper() == "SGD":
+        params["momentum"] = trial.suggest_float("momentum", low=0.0, high=0.99)
+    #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
+    params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
+    #params["low_weight"] = trial.suggest_uniform("low_weight", 1, 2)
     #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)
@@ -308,26 +399,17 @@ if __name__ == '__main__':
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
         study.optimize(objective, n_trials=15)
-        #print("[INFO] BEST HYPERPARAMETERS:")
+        print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
-            #print(f"{key}: {val}")
-            with open("logs/hypertuning.txt") as file:
-                file.write(f"{key}: {val}")
-        with open("logs/hypertuning.txt") as file:
-                file.write(f"[INFO] BEST AUROC: {trial.value:.3f}")
-        #print(f"[INFO] BEST AUROC: {trial.value:.3f}")
+            print(f"{key}: {val}")
+        print(f"[INFO] BEST AUROC: {trial.value:.3f}")
     else:   # else parameters from config file
         with open(config, "r") as config_file:
             params = yaml.safe_load(config_file)
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        if torch.cuda.is_available():
-            print(f"CUDA Version: {torch.version.cuda}")
-            print(f"Device: {torch.cuda.get_device_name(0)}")
-            print(f"Device Capability: {torch.cuda.get_device_capability(0)}")
-            print(f"Current Device: {torch.cuda.current_device()}")
-            print(f"Device Count: {torch.cuda.device_count()}")
+        
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")

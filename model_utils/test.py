@@ -28,7 +28,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, low_weight = 1, amap_mode='m
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer
     """
-    weights = [low_weight] + [1 for _ in range(len(fs_list) - 1)]
+    #weights = [low_weight] + [1 for _ in range(len(fs_list) - 1)]
     if amap_mode == 'mul':
         anomaly_map = np.ones([out_size, out_size])
     else:
@@ -40,7 +40,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, low_weight = 1, amap_mode='m
         ft = ft_list[i]
         #fs_norm = F.normalize(fs, p=2)
         #ft_norm = F.normalize(ft, p=2)
-        a_map = weights[i]*(1 - F.cosine_similarity(fs, ft))
+        a_map = 1 - F.cosine_similarity(fs, ft)
         a_map = torch.unsqueeze(a_map, dim=1)
         a_map = F.interpolate(a_map, size=out_size, mode='bilinear', align_corners=True)
         a_map = a_map[0, 0, :, :].to('cpu').detach().numpy()
