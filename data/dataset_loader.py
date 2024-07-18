@@ -39,7 +39,7 @@ class CustomDataset(Dataset):
         if self.norm_choice == "IMAGE_NET":
             self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
-            self.normalize = transforms.Normalize(mean=np.array(meta["mean"])/255.0, std=np.array(meta["std"]))
+            self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
         else:
             self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 
@@ -97,8 +97,8 @@ class CustomDataset(Dataset):
         # normalize
         image = self.normalize(image)
         input.update({"image": image})
-        noisy_image = self.add_noise(image, self.noise_factor, self.p)
-        input.update({"noisy_image": noisy_image})
+        #noisy_image = self.add_noise(image, self.noise_factor, self.p)
+        #input.update({"noisy_image": noisy_image})
         #self.plot_channels(image, "Original Image Channels")
         #self.plot_channels(noisy_image, "Noisy Image Channels")
 
