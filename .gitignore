@@ -6,7 +6,7 @@ __pycache__
 chunks
 *.tif
 *.yml
-*.yaml
+*chunk*.yaml
 *.npy
 *.pth
 *.json
