@@ -283,7 +283,7 @@ def objective(trial):
     params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
     params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
     params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [8, 16, 24, 32, 64])
+    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32, 64])
     params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
