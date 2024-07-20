@@ -14,5 +14,3 @@ pip install --user -r hpc_req.txt
 pip install --user torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 python main.py --config configs/model_config_adam.yaml --tune
-
-conda deactivate
