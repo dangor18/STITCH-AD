@@ -61,7 +61,7 @@ class CustomDataset(Dataset):
         meta = self.metas[index]
         
         # read image
-        filename = os.path.join(self.data_path, meta["filename"])
+        filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
         label = meta["label"]
         image = np.load(filename)
         if self.resize_dim:
