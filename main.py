@@ -37,8 +37,8 @@ def loss_function(a, b, weights):
     cos_loss = torch.nn.CosineSimilarity()
     loss = 0
     for item in range(len(a)):
-        loss += torch.mean(1-cos_loss(a[item].view(a[item].shape[0],-1),
-                                      b[item].view(b[item].shape[0],-1)))
+        loss += weights[item] * torch.mean(1-cos_loss(a[item].view(a[item].shape[0],-1),
+                                        b[item].view(b[item].shape[0],-1)))
     return loss
 
 def loss_concat(a, b):
@@ -92,6 +92,13 @@ def get_optimizer(config, model_params = None):
             weight_decay=config["weight_decay"],
             dampening=config.get("dampening", 0),
         )
+    elif str(config.get("optimizer", None)).upper() == "ADAMW":
+        return torch.optim.AdamW(
+            model_params,
+            lr=config["learning_rate"],
+            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
+            weight_decay=config["weight_decay"]
+        )
     else:
         print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
         return None
@@ -134,7 +141,7 @@ def train_tuning(params, trial):
             with autocast():
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+                loss = loss_function(inputs, outputs, weights=params.get("weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -145,7 +152,7 @@ def train_tuning(params, trial):
         
         # evaluate every 3 epochs
         if (epoch + 1) % 3 == 0:
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device)
+            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("weights", [1.0, 1.0, 1.0]))
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -198,7 +205,7 @@ def train_normal(params, train_loader, test_loader, device):
             with autocast():
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, weights=[params.get("low_weight", 1)] + [1 for _ in range(len(inputs) - 1)])
+                loss = loss_function(inputs, outputs, weights=params.get("weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -217,7 +224,7 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         # evaluate every 10 epochs
         if (epoch + 1) % 10 == 0:
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], params.get("low_weight", 1))
+            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
             
             if total_auroc > best_auroc:
@@ -269,7 +276,7 @@ def get_loaders(params):
 # objective function for optuna
 def objective(trial):
     # open config
-    with open("configs\model_config.yaml", "r") as ymlfile:
+    with open("configs/model_config.yaml", "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
     # new param suggestions
@@ -280,22 +287,23 @@ def objective(trial):
     params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
-    #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "SGD"])
-    if str(params["optimizer"]).upper() == "ADAM":
+    #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "ADAMW", "SGD"])
+    if str(params["optimizer"]).upper() == "ADAM" or str(params["optimizer"]).upper() == "ADAMW":
         params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
         params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
     elif str(params["optimizer"]).upper() == "SGD":
         params["momentum"] = trial.suggest_float("momentum", low=0.0, high=0.99)
+
     #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
     params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    #params["low_weight"] = trial.suggest_uniform("low_weight", 1, 2)
+    #params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
     #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", default="configs\model_config.yaml", required=False)
+    parser.add_argument("--config", default="configs/model_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     args = parser.parse_args()
 

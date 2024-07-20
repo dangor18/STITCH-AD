@@ -11,10 +11,9 @@ norm_choice: IMAGE_NET
 model_path: checkpoints/model.pth
 architecture: "resnet50"
 bn_attention: True
-low_weight: 1
-dem_weight: 1
+weights: [1.0, 1.0, 1.0]
 
-optimizer: adam
+optimizer: adamw
 num_epochs: 100
 batch_size: 8
 learning_rate: 0.002

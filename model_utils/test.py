@@ -23,7 +23,7 @@ import matplotlib
 import pickle
 from collections import defaultdict
 
-def cal_anomaly_map(fs_list, ft_list, out_size=224, low_weight = 1, amap_mode='mul'):
+def cal_anomaly_map(fs_list, ft_list, out_size=224, weights = [1.0, 1.0, 1.0], amap_mode='mul'):
     """
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer
@@ -40,7 +40,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, low_weight = 1, amap_mode='m
         ft = ft_list[i]
         #fs_norm = F.normalize(fs, p=2)
         #ft_norm = F.normalize(ft, p=2)
-        a_map = 1 - F.cosine_similarity(fs, ft)
+        a_map = weights[i] * (1 - F.cosine_similarity(fs, ft))
         a_map = torch.unsqueeze(a_map, dim=1)
         a_map = F.interpolate(a_map, size=out_size, mode='bilinear', align_corners=True)
         a_map = a_map[0, 0, :, :].to('cpu').detach().numpy()
@@ -66,7 +66,7 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, low_weight = 1, plot_results=False, n_plot_per_class=5):
+def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weights = [1.0, 1.0, 1.0], plot_results=False, n_plot_per_class=5):
     """
     Evaluate the model for multiple anomaly types
     """
@@ -95,7 +95,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, low_w
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], low_weight, amap_mode='a')
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], weights, amap_mode='a')
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map)
@@ -158,6 +158,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, low_w
     if log_path:
         with open(log_path, "a") as file:
             file.write(f"\n= Average AUROC: {round(average_auroc, 3)}")
+    
     return average_auroc
 
 def calculate_auroc(gt_list, pr_list):
