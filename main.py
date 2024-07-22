@@ -276,15 +276,21 @@ def get_loaders(params):
 
 # objective function for optuna
 def objective(trial):
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument("--config", default="configs/model_config.yaml", required=False)
+    parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
+    args = parser.parse_args()
+
+    config = args.config
     # open config
-    with open("configs/model_config.yaml", "r") as ymlfile:
+    with open(config, "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
     # new param suggestions
     params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
     params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
     params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32, 64])
+    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
     params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     #params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])

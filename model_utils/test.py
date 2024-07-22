@@ -69,13 +69,14 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
     """
     Evaluate the model for multiple anomaly types
     """
+    """
     ckp = torch.load("checkpoints/model.pth")
     for k, v in list(ckp['bn'].items()):
         if 'memory' in k:
             ckp['bn'].pop(k)
     decoder.load_state_dict(ckp['decoder'])
     bn.load_state_dict(ckp['bn'])
-
+    """
     bn.eval()
     decoder.eval()
    
