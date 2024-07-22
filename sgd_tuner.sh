@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=a100free
 #SBATCH --partition=a100
-#SBATCH --nodes=1 --ntasks=2 --gres=gpu:ampere:1
+#SBATCH --nodes=1 --ntasks=1 --gres=gpu:ampere:1
 #SBATCH --time=48:00:00
 #SBATCH --job-name="RD4AD_TUNE_SGD"
 #SBATCH --mail-user=grddan017@myuct.ac.za

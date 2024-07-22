@@ -223,7 +223,8 @@ def train_normal(params, train_loader, test_loader, device):
         with open(params["log_path"], "a") as log_file:
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         # evaluate every 10 epochs
-        if (epoch + 1) % 10 == 0:
+    
+        if (epoch + 1) % 1 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
             
@@ -295,7 +296,7 @@ def objective(trial):
         params["momentum"] = trial.suggest_float("momentum", low=0.0, high=0.99)
 
     #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
-    params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
+    #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
     #params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
     #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 

@@ -137,6 +137,11 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
             file.write("\n=== EVALUATION ===")
     
     for orchard_id, orchard_data in orchard_auroc_results.items():
+        print(orchard_id)
+        if (orchard_anomaly_scores[orchard_id]["case_1"][1] != 0 and orchard_anomaly_scores[orchard_id]["case_1"][0] / orchard_anomaly_scores[orchard_id]["case_1"][1] < orchard_anomaly_scores[orchard_id]["normal"][0] / orchard_anomaly_scores[orchard_id]["normal"][1]):
+            orchard_data["pr_case1"] = [1 - x for x in orchard_data["pr_case1"]]
+            orchard_data["gt_case1"] = [1 if x == 0 else 0 for x in orchard_data["gt_case1"]]
+
         auroc_case1 = calculate_auroc(orchard_data["gt_case1"], orchard_data["pr_case1"])
         auroc_case2 = calculate_auroc(orchard_data["gt_case2"], orchard_data["pr_case2"])
         auroc_total = calculate_auroc(orchard_data["gt_total"], orchard_data["pr_total"])
@@ -153,7 +158,6 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
                 file.write(f"\n+ SCORES: N: {orchard_anomaly_scores[orchard_id]['normal']}, C1: {orchard_anomaly_scores[orchard_id]['case_1']}, C2: {orchard_anomaly_scores[orchard_id]['case_2']}")
 
     # calculate AUROC overall
-    #auroc_overall = calculate_auroc(gt_list_overall, pr_list_overall)
     average_auroc = average_auroc / orchard_count
     if log_path:
         with open(log_path, "a") as file:
