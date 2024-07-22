@@ -224,9 +224,9 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % 10 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
-            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
+            print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.5f}")
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -322,7 +322,7 @@ if __name__ == '__main__':
         trial = study.best_trial
         for key, val in trial.params.items():
             print(f"{key}: {val}")
-        print(f"[INFO] BEST AUROC: {trial.value:.3f}")
+        print(f"[INFO] BEST AUROC: {trial.value:.5f}")
     else:   # else parameters from config file
         with open(config, "r") as config_file:
             params = yaml.safe_load(config_file)
@@ -336,4 +336,4 @@ if __name__ == '__main__':
         
         # train
         best_auroc = train_normal(params, train_loader, test_loader, device)
-        print(f"[INFO] BEST OVERALL AUROC: {best_auroc:.3f}")
+        print(f"[INFO] BEST OVERALL AUROC: {best_auroc:.5f}")

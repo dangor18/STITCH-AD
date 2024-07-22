@@ -143,19 +143,19 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
         average_auroc += auroc_total
         orchard_count += 1
 
-        orchard_anomaly_scores[orchard_id]["case_1"] = (sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"]) if not len(orchard_data["pr_case1"]) == 0 else None
-        orchard_anomaly_scores[orchard_id]["case_2"] = (sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"]) if not len(orchard_data["pr_case2"]) == 0 else None
-        orchard_anomaly_scores[orchard_id]["normal"] = (sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"])
+        orchard_anomaly_scores[orchard_id]["case_1"] = round(sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"], 5) if not len(orchard_data["pr_case1"]) == 0 else None
+        orchard_anomaly_scores[orchard_id]["case_2"] = round(sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"], 5) if not len(orchard_data["pr_case2"]) == 0 else None
+        orchard_anomaly_scores[orchard_id]["normal"] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         if log_path:
             with open(log_path, "a") as file:
                 file.write(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, OVERALL: {auroc_total}")
                 file.write(f"\n+ SCORES: N: {orchard_anomaly_scores[orchard_id]['normal']}, C1: {orchard_anomaly_scores[orchard_id]['case_1']}, C2: {orchard_anomaly_scores[orchard_id]['case_2']}")
 
     # calculate AUROC overall
-    average_auroc = average_auroc / orchard_count
+    average_auroc = round(average_auroc / orchard_count, 5)
     if log_path:
         with open(log_path, "a") as file:
-            file.write(f"\n= Average AUROC: {round(average_auroc, 3)}")
+            file.write(f"\n= Average AUROC: {average_auroc}")
     
     return average_auroc
 

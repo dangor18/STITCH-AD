@@ -1,6 +1,6 @@
 data_path: data/chunks/DNR/
 meta_path: data/chunks/DNR/metadata/
-log_path: logs/NewScale3.txt
+log_path: logs/new_invert.txt
 p_flip: 0.3
 noise_factor: 0
 resize_x: 256
@@ -10,12 +10,12 @@ norm_choice: IMAGE_NET
 
 model_path: checkpoints/model.pth
 architecture: "resnet50"
-bn_attention: True
+bn_attention: False
 weights: [1.0, 1.0, 1.0]
 
-optimizer: adamw
+optimizer: adam
 num_epochs: 100
-batch_size: 8
+batch_size: 16
 learning_rate: 0.002
 lr_factor: 0.5
 patience: 3
