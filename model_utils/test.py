@@ -70,6 +70,13 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
     """
     Evaluate the model for multiple anomaly types
     """
+    ckp = torch.load("checkpoints/model.pth")
+    for k, v in list(ckp['bn'].items()):
+        if 'memory' in k:
+            ckp['bn'].pop(k)
+    decoder.load_state_dict(ckp['decoder'])
+    bn.load_state_dict(ckp['bn'])
+
     bn.eval()
     decoder.eval()
    
@@ -125,27 +132,30 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
     for orchard_id, orchard_data in orchard_auroc_results.items():
         #print(orchard_id)
         # normalize scores with max anomaly score
-        for key in ["pr_case1", "pr_case2", "pr_normal"]:
-            orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
-        # invert anomaly scores for case 1 if necessary 
+        #for key in ["pr_case1", "pr_case2", "pr_normal"]:
+            #orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
+
+        # calc average scores for each case
+        orchard_anomaly_scores[orchard_id]["case_2"] = round(sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"], 5) if not len(orchard_data["pr_case2"]) == 0 else None
+        orchard_anomaly_scores[orchard_id]["normal"] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
+
+        # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
         if (orchard_case_count[orchard_id]["case_1"] != 0 and 
         sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
-            orchard_data["pr_case1"] = [1 - x for x in orchard_data["pr_case1"]]
+            orchard_data["pr_case1"] = [orchard_anomaly_scores[orchard_id]["normal"] - x + orchard_anomaly_scores[orchard_id]["normal"] for x in orchard_data["pr_case1"]]
 
-        auroc_case1 = calculate_auroc([1 for _ in range(len(orchard_data["pr_normal"]))] + [0 for _ in range(len(orchard_data["pr_case1"]))], 
+        orchard_anomaly_scores[orchard_id]["case_1"] = round(sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"], 5) if not len(orchard_data["pr_case1"]) == 0 else None
+
+        auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
                                       orchard_data["pr_normal"] + orchard_data["pr_case1"])
-        auroc_case2 = calculate_auroc([1 for _ in range(len(orchard_data["pr_normal"]))] + [0 for _ in range(len(orchard_data["pr_case2"]))], 
+        auroc_case2 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))], 
                                       orchard_data["pr_normal"] + orchard_data["pr_case2"])
-        auroc_total = calculate_auroc([1 for _ in range(len(orchard_data["pr_normal"]))] + [0 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
+        auroc_total = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
                                       orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
 
         average_auroc += auroc_total
         orchard_count += 1
-
-        orchard_anomaly_scores[orchard_id]["case_1"] = round(sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"], 5) if not len(orchard_data["pr_case1"]) == 0 else None
-        orchard_anomaly_scores[orchard_id]["case_2"] = round(sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"], 5) if not len(orchard_data["pr_case2"]) == 0 else None
-        orchard_anomaly_scores[orchard_id]["normal"] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         if log_path:
             with open(log_path, "a") as file:
                 file.write(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, OVERALL: {auroc_total}")

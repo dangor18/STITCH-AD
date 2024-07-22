@@ -6,20 +6,20 @@ noise_factor: 0
 resize_x: 256
 resize_y: 256
 channels: 3
-norm_choice: IMAGE_NET
+norm_choice: PER_ORCAHRD
 
 model_path: checkpoints/model.pth
-architecture: "resnet50"
+architecture: "wide_resnet50_2"
 bn_attention: False
 weights: [1.0, 1.0, 1.0]
 
 optimizer: adam
 num_epochs: 100
 batch_size: 16
-learning_rate: 0.002
-lr_factor: 0.5
-patience: 3
-weight_decay: 0.00001
-beta1: 0.5
+learning_rate: 0.0005
+lr_factor: 0.17
+patience: 6
+weight_decay: 0.0024
+beta1: 0.69
 beta2: 0.999
 momentum: 0.0001
