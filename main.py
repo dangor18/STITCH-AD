@@ -222,8 +222,8 @@ def train_normal(params, train_loader, test_loader, device):
         print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}")
         with open(params["log_path"], "a") as log_file:
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
+        
         # evaluate every 10 epochs
-    
         if (epoch + 1) % 1 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.3f}")
