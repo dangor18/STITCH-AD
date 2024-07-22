@@ -28,7 +28,6 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, weights = [1.0, 1.0, 1.0], a
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer
     """
-    #weights = [low_weight] + [1 for _ in range(len(fs_list) - 1)]
     if amap_mode == 'mul':
         anomaly_map = np.ones([out_size, out_size])
     else:

@@ -10,9 +10,8 @@ norm_choice: IMAGE_NET
 
 model_path: checkpoints/model.pth
 architecture: "resnet50"
-bn_attention: True
-low_weight: 1
-dem_weight: 1
+bn_attention: False
+weights: [1.0, 1.0, 1.0] 
 
 optimizer: SGD
 num_epochs: 100

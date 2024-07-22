@@ -287,7 +287,7 @@ def objective(trial):
     params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32, 64])
     params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
+    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
     #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "ADAMW", "SGD"])
     if str(params["optimizer"]).upper() == "ADAM" or str(params["optimizer"]).upper() == "ADAMW":
         params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
@@ -297,7 +297,7 @@ def objective(trial):
 
     #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
     #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    #params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
+    params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
     #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)
@@ -317,7 +317,7 @@ if __name__ == '__main__':
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=15)
+        study.optimize(objective, n_trials=50)
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
