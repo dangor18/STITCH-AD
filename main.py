@@ -150,8 +150,8 @@ def train_tuning(params, trial):
             scaler.step(optimizer)
             scaler.update()
         
-        # evaluate every 3 epochs
-        if (epoch + 1) % 3 == 0:
+        # evaluate every 10 epochs
+        if (epoch + 1) % 10 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("weights", [1.0, 1.0, 1.0]))
             
             if total_auroc > best_auroc:
@@ -224,7 +224,7 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 1 == 0:
             total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.5f}")
             
@@ -292,7 +292,7 @@ def objective(trial):
     params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
     params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
     params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
-    params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
+    #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     #params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
     #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "ADAMW", "SGD"])
     if str(params["optimizer"]).upper() == "ADAM" or str(params["optimizer"]).upper() == "ADAMW":
@@ -303,7 +303,7 @@ def objective(trial):
 
     #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
     #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
+    #params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
     #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
 
     return train_tuning(params, trial)

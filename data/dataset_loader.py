@@ -71,6 +71,7 @@ class CustomDataset(Dataset):
         #image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
         if np.ndim(image) == 2:
             image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
+            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
         else:
             image = torch.from_numpy(image).float().permute(2, 0, 1)
         #image = torch.squeeze(image)
