@@ -39,7 +39,7 @@ def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = Tru
     Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
     """
     if architecture == "wide_resnet50_2":
-        encoder, bn = wide_resnet50_2(pretrained=True)
+        encoder, bn = wide_resnet50_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet50_2(pretrained=False)
     elif architecture == "resnet50":
         encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
@@ -118,12 +118,10 @@ def train_tuning(params, trial):
     loss_fn = get_loss_fn(params)
     
     # lr scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
-        mode='max',
-        factor=params["lr_factor"],
-        patience=params["patience"],
-        verbose=True
+        step_size=30,
+        gamma=params["lr_factor"],
     )
 
     scaler = GradScaler("cuda")
@@ -150,12 +148,16 @@ def train_tuning(params, trial):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0:
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
+            if params["loss_weight_score"]:
+                temp = params["loss_weights"]
+            else:
+                temp = [1.0, 1.0, 1.0]
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"), temp=temp)
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
             
-            scheduler.step(total_auroc)
+            scheduler.step()
 
             # prune training if necessary (bad params)
             trial.report(total_auroc, epoch)
@@ -178,12 +180,10 @@ def train_normal(params, train_loader, test_loader, device):
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
     loss_fn = get_loss_fn(params)
     # lr scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
-        mode='max',
-        factor=params["lr_factor"],
-        patience=params["patience"],
-        verbose=True
+        step_size=30,
+        gamma=params["lr_factor"],
     )
 
     scaler = GradScaler("cuda")
@@ -191,8 +191,8 @@ def train_normal(params, train_loader, test_loader, device):
     best_auroc = 0
     auroc_dict = {}
     print("[INFO] TRAINING MODEL...")
-    # train loop
-    
+
+    # train loop    
     for epoch in range(params["num_epochs"]):
         bn.train()
         decoder.train()
@@ -225,8 +225,13 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 3 == 0:
-            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], 
+        if (epoch + 1) % 1 == 0:
+            if params["loss_weight_score"]:
+                temp = params["loss_weights"]
+            else:
+                temp = [1.0, 1.0, 1.0]
+            print(temp)
+            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=temp,
                                                          weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
             
             # collect aurocs for each orchard and total for plotting
@@ -240,7 +245,7 @@ def train_normal(params, train_loader, test_loader, device):
                 print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
                 torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
             
-            scheduler.step(total_auroc)
+            scheduler.step()
     
     test(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
     plot_auroc(auroc_dict)
@@ -265,7 +270,8 @@ def get_loaders(params):
         (params["resize_x"], params["resize_y"]), 
         noise_factor=params["noise_factor"], 
         p=params["flip"],
-        norm_choice=params["norm_choice"]
+        norm_choice=params["norm_choice"],
+        channels=params.get("channels", 3)
     )
     train_loader = DataLoader(
         train_data, 
@@ -280,7 +286,8 @@ def get_loaders(params):
         params["data_path"], 
         None, 
         (params["resize_x"], params["resize_y"]),
-        norm_choice=params["norm_choice"]
+        norm_choice=params["norm_choice"],
+        channels=params.get("channels", 3)
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     
@@ -304,7 +311,7 @@ def objective(trial):
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
     #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
+    params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
     #params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
     #params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
@@ -313,6 +320,7 @@ def objective(trial):
     params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
     params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
 
+    params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
     params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
     params["score_weights"] = [params["score_weight"], 1 - params["score_weight"]]
     params["score_mode"] = trial.suggest_categorical("score_mode", ["a", "mul"])
@@ -350,7 +358,7 @@ if __name__ == '__main__':
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=50)
+        study.optimize(objective, n_trials=150)
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():

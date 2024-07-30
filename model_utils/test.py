@@ -24,7 +24,7 @@ import pickle
 from collections import defaultdict
 from model_utils.plots import plot_sample, plot_histogram
 
-def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
+def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul', weights=[1.0, 1.0, 1.0]):
     """
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer
@@ -40,7 +40,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul'):
         ft = ft_list[i]
         #fs_norm = F.normalize(fs, p=2)
         #ft_norm = F.normalize(ft, p=2)
-        a_map = 1 - F.cosine_similarity(fs, ft)
+        a_map = weights[i] * (1 - F.cosine_similarity(fs, ft))
         a_map = torch.unsqueeze(a_map, dim=1)
         a_map = F.interpolate(a_map, size=out_size, mode='bilinear', align_corners=True)
         a_map = a_map[0, 0, :, :].to('cpu').detach().numpy()
@@ -66,7 +66,7 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weights = [1.0, 0.0], score_mode='a'):
+def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weights = [1.0, 0.0], score_mode='a', temp=[1.0, 1.0, 1.0]):
     """
     Evaluate the model for multiple anomaly types
     """
@@ -98,7 +98,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, weigh
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode, weights=temp)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = weights[0] * np.max(anomaly_map) + weights[1] * np.average(anomaly_map)

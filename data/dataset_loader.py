@@ -20,7 +20,8 @@ class CustomDataset(Dataset):
         resize_dim=None,
         noise_factor=0,
         p=0, 
-        norm_choice = "IMAGE_NET"
+        norm_choice = "IMAGE_NET",
+        channels = 3
     ):
         self.meta_file = meta_file
         self.data_path = data_path
@@ -30,6 +31,7 @@ class CustomDataset(Dataset):
         self.p = p
         self.norm_choice = norm_choice
         self.i = 0
+        self.channels = channels
         
         # construct metas
         with open(meta_file, "r") as f_r:
@@ -123,7 +125,8 @@ class CustomDataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        if np.ndim(image) == 2:
+        #if np.ndim(image) == 2:
+        if self.channels == 3:      # NOTE: This is for DEM TESTING only TODO: CHANGE!!!
             #image = torch.from_numpy(image).float()
             #image = image.expand(3, -1, -1)
             dem = image
@@ -139,7 +142,9 @@ class CustomDataset(Dataset):
             #image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
             #self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
         else:
-            image = torch.from_numpy(image).float().permute(2, 0, 1)
+            #image = torch.from_numpy(image).float().permute(2, 0, 1)
+            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
+            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
 
         if self.transform_fn:
             image = self.transform_fn(image)

@@ -123,17 +123,3 @@ chunk_size: 144
 chunk_overlap: 0
 anomaly_threshold: 0.8
 scale_ratio: 0.5
----
-path: F:\Data\UOG_1724
-output_path: data\chunks\D_80\1724
-files:
-  -
-    name: orthos\export-data\dem_full.tif
-    dimensions: 1
-
-mask: F:\Data\UOG_1724\mask_1724.tif
-reference: F:\Data\UOG_1724\orthos\data-analysis\reg.tif
-chunk_size: 144
-chunk_overlap: 0
-anomaly_threshold: 0.8
-scale_ratio: 0.5
