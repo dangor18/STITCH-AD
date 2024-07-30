@@ -1,9 +1,10 @@
 import os
 import json
 import numpy as np
+import sys
 
 # Set the root directory where your dataset is located
-root_dir = "data/chunks/DNR"
+root_dir = sys.argv[1]
 
 # Define the class names and their corresponding labels
 class_labels = {

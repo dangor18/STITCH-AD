@@ -5,6 +5,8 @@ import numpy as np
 import os
 import cv2
 import yaml
+from scipy import ndimage
+from skimage import filters
 from PIL import Image
 from torchvision import transforms
 import json
@@ -41,15 +43,69 @@ class CustomDataset(Dataset):
         elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
             self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
         else:
-            self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            #self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            self.normalize = None
 
     def __len__(self):
         return len(self.metas)
 
+    def calculate_ndvi(self, image_array):
+        """
+        Calculate NDVI from a NumPy array with shape (H, W, C) where C=3,
+        and channel 2 is NIR, channel 3 is RED.
+        
+        Args:
+        image_array (numpy.ndarray): Input image array with shape (H, W, 3)
+        
+        Returns:
+        numpy.ndarray: NDVI array with shape (H, W)
+        """
+        # extract NIR and RED spectral channels
+        nir = image_array[:, :, 1].astype(np.float32)
+        red = image_array[:, :, 2].astype(np.float32)
+        
+        numerator = nir - red
+        denominator = nir + red
+        
+        ndvi = np.divide(numerator, denominator, out=np.zeros_like(numerator), where=denominator!=0)
+        ndvi = np.clip(ndvi, 0, 1)
+        return ndvi
+
+    def detect_dem_artifacts(self, image_array, smooth_sigma=1, diff_threshold=0.2):
+        """
+        Detect potential artifacts in DEM by comparing with NDVI.
+        
+        Args:
+        image_array (numpy.ndarray): Input image array with shape (H, W, C)
+        dem_index (int): Index of DEM channel (default: 0)
+        nir_index (int): Index of NIR channel (default: 1)
+        red_index (int): Index of Red channel (default: 2)
+        smooth_sigma (float): Sigma for Gaussian smoothing (default: 1)
+        diff_threshold (float): Threshold for considering a difference significant (default: 0.2)
+        
+        Returns:
+        numpy.ndarray: Array highlighting potential artifacts
+        """
+        #ndvi = self.calculate_ndvi(image_array)
+        #dem = filters.prewitt(image_array[:, :, 0].astype(np.float32))
+        # Normalize DEM and NDVI to 0-1 range
+        #ndvi_norm = (ndvi - np.min(ndvi)) / (np.max(ndvi) - np.min(ndvi))
+        
+        # Calculate difference
+        #diff = np.abs(dem - ndvi)
+        #diff = np.clip(diff, 0, 1)
+        # Apply Gaussian smoothing to reduce noise
+        #diff_smooth = ndimage.gaussian_filter(diff, sigma=smooth_sigma)
+        #thresh = np.mean(diff_smooth) + diff_threshold * np.std(diff_smooth)
+        # Threshold the difference to highlight potential artifacts
+        #artifacts = np.where(diff_smooth > thresh, 1, 0)
+        #temp = self.threshold_and_xor(dem, ndvi)
+        #return dem
+    
     def plot_channels(self, image, title):
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title)
-        for i, channel_name in enumerate(['Red']):
+        for i, channel_name in enumerate(['dem', 'nir', 'reg']):
             axs[i].imshow(image[i].numpy(), cmap='gray')
             axs[i].set_title(f'{channel_name} Channel')
             axs[i].axis('off')
@@ -67,19 +123,23 @@ class CustomDataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        #print(np.shape(image))
-        #image = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0    # equivalent to ToTensor just without using uint8
         if np.ndim(image) == 2:
-            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
+            #image = torch.from_numpy(image).float()
+            #image = image.expand(3, -1, -1)
+            dem = image
+            prewitt_dem = filters.prewitt(dem)
+            sobel_dem = ndimage.sobel(dem)
+
+            dem = dem[:, :, np.newaxis]
+            prewitt_dem = prewitt_dem[:, :, np.newaxis]
+            sobel_dem = sobel_dem[:, :, np.newaxis]
+
+            image = np.concatenate([dem, sobel_dem, prewitt_dem], axis=2)
+            image = torch.from_numpy(image).float().permute(2, 0, 1)
+            #image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
+            #self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
         else:
             image = torch.from_numpy(image).float().permute(2, 0, 1)
-        #image = torch.squeeze(image)
-        #image = transforms.ToTensor()(image)
-
-        #image = Image.fromarray(image, mode='RGB')
-        #image = transforms.ToTensor()(image)
-        #print(image)
 
         if self.transform_fn:
             image = self.transform_fn(image)
@@ -96,8 +156,11 @@ class CustomDataset(Dataset):
             input["clsname"] = filename.split("/")[-4]
        
         # normalize
-        image = self.normalize(image)
+        if self.normalize:
+            image = self.normalize(image)
+
         input.update({"image": image})
+
         #noisy_image = self.add_noise(image, self.noise_factor, self.p)
         #input.update({"noisy_image": noisy_image})
         #self.plot_channels(image, "Original Image Channels")

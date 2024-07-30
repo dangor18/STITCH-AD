@@ -1,5 +1,4 @@
 import torch
-#from torchvision.models import Wide_ResNet50_2_Weights
 from torch import Tensor
 import torch.nn as nn
 try:
@@ -7,7 +6,7 @@ try:
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 from typing import Type, Any, Callable, Union, List, Optional
-
+#from torchgeo.models import ResNet50_Weights
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
@@ -97,67 +96,6 @@ class ChannelReductionCBAM(nn.Module):
         
         x = x * self.ca(x)
         x = x * self.sa(x)
-        return x
-
-class SEBlock(nn.Module):
-    """
-    Squeeze-and-Excitation block from 'Squeeze-and-Excitation Networks,' https://arxiv.org/abs/1709.01507.
-
-    Parameters:
-    ----------
-    channels : int
-        Number of channels.
-    reduction : int, default 16
-        Squeeze reduction value.
-    approx_sigmoid : bool, default False
-        Whether to use approximated sigmoid function.
-    activation : function, or str, or nn.Module
-        Activation function or name of activation function.
-    """
-    def __init__(
-        self,
-        in_channels,
-        out_channels = 3,
-        target_channel = 0,
-        target_weight = 1.0,
-        reduction = 16
-        ):
-        super(SEBlock, self).__init__()
-        self.target_channel = target_channel
-        self.target_weight = target_weight
-        mid_channels = in_channels // reduction
-
-        self.pool = nn.AdaptiveAvgPool2d(output_size=1)
-        # TODO: try 1x1 vs 3x3
-        self.conv1 = conv1x1(
-            in_planes=in_channels,
-            out_planes=mid_channels,
-            bias=False)
-        self.activ = nn.ReLU(inplace=False)
-        self.conv2 = conv1x1(
-            in_planes=mid_channels,
-            out_planes=out_channels,
-            bias=False)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        w = self.pool(x)
-        w = self.conv1(w)
-        w = self.activ(w)
-        w = self.conv2(w)
-        w = self.sigmoid(w)
-        w = self.pool(x)
-        w = self.conv1(w)
-        w = self.activ(w)
-        w = self.conv2(w)
-        w = self.sigmoid(w)
-
-        # apply weight to channel with DEM
-        w_adjusted = w.clone()
-        w_adjusted[:, self.target_channel, :, :] = w[:, self.target_channel, :, :] * self.target_weight
-
-        x = x * w_adjusted  # apply attention
-
         return x
 
 class BasicBlock(nn.Module):
@@ -375,7 +313,6 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
-        #temp = x.clone()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -407,7 +344,8 @@ def _resnet(
     """
     model = ResNet(block, layers, in_channels=in_channels, **kwargs)
     if pretrained:
-        #state_dict = Wide_ResNet50_2_Weights.IMAGENET1K_V2.get_state_dict(progress=progress)
+        #weights = ResNet50_Weights.SENTINEL2_RGB_SECO
+        #state_dict = weights.get_state_dict(progress=progress)
         state_dict = load_state_dict_from_url(model_urls[arch],progress=progress)
         if in_channels == 1:
             original_conv1_weight = state_dict['conv1.weight']
@@ -476,47 +414,6 @@ class AttnBasicBlock(nn.Module):
         out = self.relu(out)
 
         return out
-
-class GLEAM(nn.Module):
-    def __init__(self, channels, reduction_ratio=16):
-        super(GLEAM, self).__init__()
-        if isinstance(channels, list):
-            self.channels = sum(channels)
-        else:
-            self.channels = channels
-        self.reduction_ratio = reduction_ratio
-
-        # Global attention
-        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.global_fc = nn.Sequential(
-            nn.Linear(self.channels, self.channels // reduction_ratio),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.channels // reduction_ratio, self.channels),
-            nn.Sigmoid()
-        )
-
-        # Local attention
-        self.local_conv = nn.Conv2d(self.channels, 1, kernel_size=7, padding=3)
-
-    def forward(self, x):
-        if isinstance(x, list):
-            # Concatenate multi-scale features if input is a list
-            x = torch.cat(x, dim=1)
-        
-        b, c, _, _ = x.size()
-        
-        # Global attention
-        global_weight = self.global_avg_pool(x).view(b, c)
-        global_weight = self.global_fc(global_weight).view(b, c, 1, 1)
-
-        # Local attention
-        local_weight = self.local_conv(x)
-        local_weight = nn.functional.sigmoid(local_weight)
-
-        # Combine global and local attention
-        weight = global_weight * local_weight
-
-        return x * weight
 
 class AttnBottleneck(nn.Module):
     

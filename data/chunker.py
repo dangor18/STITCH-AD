@@ -16,29 +16,6 @@ import tqdm.contrib
 import tqdm.contrib.itertools
 import yaml
 
-def get_min_patches(local_name, num_bands, temp_dir, mask, nodata_ref, x_starts, y_starts, block_size_x, block_size_y):
-    min = 9999999
-    with rasterio.open(os.path.join(temp_dir, local_name)) as src:
-        # determines whether to show progress bar or not. Don't show if verbose is enabled since the print statements get in the way of the progress bar
-        loop_product = tqdm.contrib.itertools.product(enumerate(y_starts), enumerate(x_starts), total=len(y_starts) * len(x_starts), desc=f"Getting min patch value for {local_name}")
-            
-        for (i, y), (j, x) in loop_product:
-            # read in block from upscaled image
-            win = Window(x, y, block_size_x, block_size_y)
-            # read in block from mask
-            mask_block = mask.read(1, window=win)
-            nodata_ref_block = nodata_ref.read(1, window=win)
-                    
-            # ignore these regions
-            if (not np.any(mask_block == 0)) and (not np.any(nodata_ref_block == -32767)):
-                # stack each band data to block array
-                block = np.stack([src.read(b, window=win) for b in range(1, num_bands + 1)])
-                # check for min
-                min = np.nanmin(block) if min > np.nanmin(block) else min
-    
-    src.close()
-    return min
-
 def getTIFDimensions(file_name):
     """
     RETURNS WIDTH AND HEIGHT FOR TIF FILE
@@ -191,14 +168,10 @@ def create_blocks_upscaling(orchard_id, files, dimensions, upscale_width, upscal
 
     for file_name, num_bands in zip(files, dimensions):
         local_name = file_name.split("/")[-1]
-        with rasterio.open(os.path.join(temp_dir, local_name)) as src:            
+        with rasterio.open(os.path.join(temp_dir, local_name)) as src:
             # block starting positions
             y_starts = np.arange(0, upscale_height - block_size_y + 1, block_size_y - overlap_y)
             x_starts = np.arange(0, upscale_width - block_size_x + 1, block_size_x - overlap_x)
-
-            min = 0
-            #if "raster.tif" in local_name or "dem_full.tif" in local_name:
-            #    min = get_min_patches(local_name, num_bands, temp_dir, mask, nodata_ref, x_starts, y_starts, block_size_x, block_size_y)
 
             # determines whether to show progress bar or not. Don't show if verbose is enabled since the print statements get in the way of the progress bar
             if verbose:
@@ -217,7 +190,6 @@ def create_blocks_upscaling(orchard_id, files, dimensions, upscale_width, upscal
                 if (not np.any(mask_block == 0)) and (not np.any(nodata_ref_block == -32767)):
                     # stack each band data to block array
                     block = np.stack([src.read(b, window=win) for b in range(1, num_bands + 1)])
-                    block = block - min     # subtract the min value (only for DEM, min = 0 otherwise)
                     
                     case_1_count = np.count_nonzero(mask_block == 1)
                     case_2_count = np.count_nonzero(mask_block == 2)
@@ -301,6 +273,14 @@ def test_upscaling(files, upscale_width, upscale_height, output_dir):
             ) as dst:
                 dst.write(data)
                 dst.colorinterp = color_interps
+
+def get_files_from_project(project_dir: str) -> list[str]:
+    return [project_dir + '/orthos/' + f for f in [
+        'data-analysis/lwir.tif',
+        'data-analysis/red.tif',
+        'data-analysis/reg.tif',
+        'export-data/orthomosaic_visible.tif'
+    ]]
 
 def main():
     parser = argparse.ArgumentParser(description="A tool for chunking large orthomosaic TIF files into smaller patches.")

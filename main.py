@@ -10,14 +10,15 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torchvision import transforms
 import numpy as np
 
-from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, ChannelReductionCBAM
+from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
 from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2
-from model_utils.test import evaluation
-
+from model_utils.test import evaluation, test
+from model_utils.loss_fns import loss_concat, loss_function, loss_function_focal, loss_function_l2, loss_function_margin, loss_function_mse, loss_function_noise
+from model_utils.plots import plot_auroc
 from data.dataset_loader import CustomDataset
 
 from tqdm import tqdm
@@ -33,35 +34,12 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-def loss_function(a, b, weights):
-    cos_loss = torch.nn.CosineSimilarity()
-    loss = 0
-    for item in range(len(a)):
-        loss += weights[item] * torch.mean(1-cos_loss(a[item].view(a[item].shape[0],-1),
-                                        b[item].view(b[item].shape[0],-1)))
-    return loss
-
-def loss_concat(a, b):
-    mse_loss = torch.nn.MSELoss()
-    cos_loss = torch.nn.CosineSimilarity()
-    loss = 0
-    a_map = []
-    b_map = []
-    size = a[0].shape[-1]
-    for item in range(len(a)):
-        a_map.append(F.interpolate(a[item], size=size, mode='bilinear', align_corners=True))
-        b_map.append(F.interpolate(b[item], size=size, mode='bilinear', align_corners=True))
-    a_map = torch.cat(a_map,1)
-    b_map = torch.cat(b_map,1)
-    loss += torch.mean(1-cos_loss(a_map,b_map))
-    return loss
-
 def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
     """
     Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
     """
     if architecture == "wide_resnet50_2":
-        encoder, bn = wide_resnet50_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        encoder, bn = wide_resnet50_2(pretrained=True)
         decoder = de_wide_resnet50_2(pretrained=False)
     elif architecture == "resnet50":
         encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
@@ -103,6 +81,25 @@ def get_optimizer(config, model_params = None):
         print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
         return None
 
+def get_loss_fn(params):
+    if params["loss_function"] == "cosine":
+        return lambda a, b: loss_function(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]))
+    elif params["loss_function"] == "concat":
+        return lambda a, b: loss_concat(a, b)
+    elif params["loss_function"] == "margin":
+        return lambda a, b: loss_function_margin(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["margin"])
+    elif params["loss_function"] == "l2":
+        return lambda a, b: loss_function_l2(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["l2_lambda"])
+    elif params["loss_function"] == "noise":
+        return lambda a, b: loss_function_noise(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["noise_factor"])
+    elif params["loss_function"] == "mse":
+        return lambda a, b: loss_function_mse(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["mse_weight"])
+    elif params["loss_function"] == "focal":
+        return lambda a, b: loss_function_focal(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["gamma"], params["alpha"])
+    else:
+        print("[ERROR] UNKNOWN LOSS FUNCTION")
+        return None
+
 def train_tuning(params, trial):
     """
     Train with hyperparameter tuning (no logs, no model saves, no printing to console)
@@ -118,6 +115,7 @@ def train_tuning(params, trial):
     decoder = decoder.to(device)
 
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
+    loss_fn = get_loss_fn(params)
     
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -128,7 +126,7 @@ def train_tuning(params, trial):
         verbose=True
     )
 
-    scaler = GradScaler()
+    scaler = GradScaler("cuda")
 
     best_auroc = 0
     # train loop
@@ -138,10 +136,10 @@ def train_tuning(params, trial):
         
         for input in train_loader:
             images = input["image"].to(device)
-            with autocast():
+            with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, weights=params.get("weights", [1.0, 1.0, 1.0]))
+                loss = loss_fn(inputs, outputs)
             
             optimizer.zero_grad()
             #loss.backward()
@@ -151,8 +149,8 @@ def train_tuning(params, trial):
             scaler.update()
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 10 == 0:
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("weights", [1.0, 1.0, 1.0]))
+        if (epoch + 1) % 2 == 0:
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -178,6 +176,7 @@ def train_normal(params, train_loader, test_loader, device):
     decoder = decoder.to(device)
  
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
+    loss_fn = get_loss_fn(params)
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
@@ -187,11 +186,13 @@ def train_normal(params, train_loader, test_loader, device):
         verbose=True
     )
 
-    scaler = GradScaler()
+    scaler = GradScaler("cuda")
 
     best_auroc = 0
+    auroc_dict = {}
     print("[INFO] TRAINING MODEL...")
     # train loop
+    
     for epoch in range(params["num_epochs"]):
         bn.train()
         decoder.train()
@@ -199,13 +200,13 @@ def train_normal(params, train_loader, test_loader, device):
         num_batches = 0
         
         train_data = tqdm(train_loader)
-
+        
         for input in train_data:
             images = input["image"].to(device)
-            with autocast():
+            with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, weights=params.get("weights", [1.0, 1.0, 1.0]))
+                loss = loss_fn(inputs, outputs)
             
             optimizer.zero_grad()
             #loss.backward()
@@ -224,8 +225,13 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 1 == 0:
-            total_auroc = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], weights=params.get("weights", [1.0, 1.0, 1.0]))
+        if (epoch + 1) % 3 == 0:
+            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], 
+                                                         weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
+            
+            # collect aurocs for each orchard and total for plotting
+            auroc_dict[epoch+1] = orchard_auroc_dict
+            
             print(f"EPOCH {epoch + 1}, LOSS: {avg_loss:.3f}, OVERALL AUROC: {total_auroc:.5f}")
             
             if total_auroc > best_auroc:
@@ -235,16 +241,22 @@ def train_normal(params, train_loader, test_loader, device):
                 torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
             
             scheduler.step(total_auroc)
-
+    
+    test(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
+    plot_auroc(auroc_dict)
     return best_auroc
 
 def get_loaders(params):
     transform_fn = transforms.Compose([
-                transforms.RandomHorizontalFlip(p=params["p_flip"]),
-                transforms.RandomVerticalFlip(p=params["p_flip"]),
-                #transforms.ColorJitter(brightness=0.0, contrast=params["contrast"], saturation=0.0, hue=0.0),
+                transforms.RandomHorizontalFlip(p=params["flip"]),
+                transforms.RandomVerticalFlip(p=params["flip"]),
+                transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
+                #transforms.ColorJitter(brightness=params["brightness"], contrast=params["contrast"]),
                 #transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
-                #transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+                #transforms.RandomErasing(p=params["erasing"], scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
+                #transforms.ElasticTransform(),
+                #transforms.RandomRotation(degrees=params["degrees"]),
+                #transforms.RandomInvert(p=0.0),
     ])  
     train_data = CustomDataset(
         params["meta_path"] + "train_metadata.json", 
@@ -252,7 +264,7 @@ def get_loaders(params):
         transform_fn, 
         (params["resize_x"], params["resize_y"]), 
         noise_factor=params["noise_factor"], 
-        p=params["p_flip"],
+        p=params["flip"],
         norm_choice=params["norm_choice"]
     )
     train_loader = DataLoader(
@@ -286,25 +298,40 @@ def objective(trial):
     with open(config, "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
-    # new param suggestions
-    params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
-    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
-    params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
-    params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
+    #params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    #params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
+    #params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
+    #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
+    #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     #params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
-    #params["optimizer"] = trial.suggest_categorical("optimizer", ["ADAM", "ADAMW", "SGD"])
-    if str(params["optimizer"]).upper() == "ADAM" or str(params["optimizer"]).upper() == "ADAMW":
-        params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
-        params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
-    elif str(params["optimizer"]).upper() == "SGD":
-        params["momentum"] = trial.suggest_float("momentum", low=0.0, high=0.99)
+    #params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+    #params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
-    #params["p_flip"] = trial.suggest_float("p_flip", 0, 0.5)
-    #params["norm_choice"] = trial.suggest_categorical("norm_choice", ["PER_ORCHARD", "IMAGE_NET"])
-    #params["weights"] = [trial.suggest_float("weights", low=0.1, high=1.0) for _ in range(3)]
-    #params["dem_weight"] = trial.suggest_uniform("dem_weight", 1, 2)
+    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
+    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
+    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
+    params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
+
+    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
+    params["score_weights"] = [params["score_weight"], 1 - params["score_weight"]]
+    params["score_mode"] = trial.suggest_categorical("score_mode", ["a", "mul"])
+
+    params["loss_function"] = trial.suggest_categorical("loss_function", [
+        "cosine", "concat", "margin", "l2", "noise", "mse", "focal"
+    ])
+    
+    if params["loss_function"] == "margin":
+        params["margin"] = trial.suggest_float("margin", 0.05, 0.5)
+    elif params["loss_function"] == "l2":
+        params["l2_lambda"] = trial.suggest_float("l2_lambda", 0.001, 0.1, log=True)
+    elif params["loss_function"] == "noise":
+        params["noise_factor"] = trial.suggest_float("noise_factor", 0.01, 0.5, log=True)
+    elif params["loss_function"] == "mse":
+        params["mse_weight"] = trial.suggest_float("mse_weight", 0.1, 1.0)
+    elif params["loss_function"] == "focal":
+        params["gamma"] = trial.suggest_float("gamma", 0.5, 5.0)
+        params["alpha"] = trial.suggest_float("alpha", 0.1, 0.9)
 
     return train_tuning(params, trial)
 
