@@ -6,11 +6,24 @@ import os
 import cv2
 import yaml
 from scipy import ndimage
+from sklearn import decomposition
 from skimage import filters
 from PIL import Image
 from torchvision import transforms
 import json
 
+# TODO: REMOVE THIS IF NOT USED
+class AddGaussianNoise(object):
+    def __init__(self, mean=0., std=1.):
+        self.std = std
+        self.mean = mean
+        
+    def __call__(self, tensor):
+        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+    
 class CustomDataset(Dataset):
     def __init__(
         self,
@@ -45,12 +58,11 @@ class CustomDataset(Dataset):
         elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
             self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
         else:
-            #self.normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             self.normalize = None
 
     def __len__(self):
         return len(self.metas)
-
+    # TODO: REMOVE THESE IF NOT USED
     def calculate_ndvi(self, image_array):
         """
         Calculate NDVI from a NumPy array with shape (H, W, C) where C=3,
@@ -125,29 +137,23 @@ class CustomDataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        #if np.ndim(image) == 2:
-        if self.channels == 3:      # NOTE: This is for DEM TESTING only TODO: CHANGE!!!
-            #image = torch.from_numpy(image).float()
-            #image = image.expand(3, -1, -1)
-            dem = image
-            prewitt_dem = filters.prewitt(dem)
-            sobel_dem = ndimage.sobel(dem)
-
-            dem = dem[:, :, np.newaxis]
-            prewitt_dem = prewitt_dem[:, :, np.newaxis]
-            sobel_dem = sobel_dem[:, :, np.newaxis]
-
-            image = np.concatenate([dem, sobel_dem, prewitt_dem], axis=2)
-            image = torch.from_numpy(image).float().permute(2, 0, 1)
-            #image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            #self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
-        else:
-            #image = torch.from_numpy(image).float().permute(2, 0, 1)
+        # only DEM
+        if np.ndim(image) == 2:
             image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
             self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
+        else:
+            dem = image[:, :, 0]
+            rgb = image[:, :, 1:]
+            grey = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGRA)
+            #prewitt_dem = filters.prewitt(dem)
+            sobel_dem = ndimage.sobel(dem)
 
-        if self.transform_fn:
-            image = self.transform_fn(image)
+            #prewitt_dem = prewitt_dem[:, :, np.newaxis]
+            sobel_dem = sobel_dem[:, :, np.newaxis]
+            grey = grey[:, :, np.newaxis]
+            image = np.concatenate([dem, sobel_dem, grey], axis=2)
+
+            image = torch.from_numpy(image).float().permute(2, 0, 1)
 
         input.update(
             {
@@ -160,6 +166,9 @@ class CustomDataset(Dataset):
         else:
             input["clsname"] = filename.split("/")[-4]
        
+        if self.transform_fn:
+            image = self.transform_fn(image)
+
         # normalize
         if self.normalize:
             image = self.normalize(image)

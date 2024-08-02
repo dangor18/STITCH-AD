@@ -4,11 +4,11 @@ import torch
 
 def plot_sample(image, label, anomaly_score, orchard_id):
     fig, axs = plt.subplots(1, 4, figsize=(15, 5))
-    if not np.ndim(image) == 2:
-        image = torch.squeeze(image)
-    print(np.shape(image))
+    if not image.shape[1] == 3:
+        image = torch.squeeze(image, 0)
+    #print(np.shape(image))
     plt.title(orchard_id)
-    for i, channel_name in enumerate(['dem', 'ndvi', 'threshold']):
+    for i, channel_name in enumerate(['dem']):
         img = image[i].cpu().numpy()
         axs[i].imshow(image[i].cpu().numpy(), cmap='gray')
         axs[i].set_title(f'{channel_name} Channel')
@@ -68,7 +68,7 @@ def plot_auroc(auroc_dict):
     plt.ylabel('AUROC')
     plt.title('AUROC per Orchard over Epochs')
     plt.legend()
-    plt.xticks(x)
+    #plt.xticks(x)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.show()

@@ -127,6 +127,7 @@ class BasicBlock(nn.Module):
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
         self.stride = stride
+        self.dropout = nn.Dropout(p=0.0)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -134,9 +135,11 @@ class BasicBlock(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
+        out = self.dropout(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
+        out = self.dropout(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -181,6 +184,7 @@ class Bottleneck(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
+        self.dropout = nn.Dropout(p=0.0)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -188,13 +192,16 @@ class Bottleneck(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
+        #out = self.dropout(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
+        #out = self.dropout(out)
 
         out = self.conv3(out)
         out = self.bn3(out)
+        #out = self.dropout(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -448,10 +455,12 @@ class AttnBottleneck(nn.Module):
         self.cbam = CBAM(inplanes, 16)
         self.downsample = downsample
         self.stride = stride
+        self.dropout = nn.Dropout(p=0.0)
 
     def forward(self, x: Tensor) -> Tensor:
         if self.attention:
             x = self.cbam(x)
+            #x = self.dropout(x)
 
         identity = x
 
@@ -557,15 +566,15 @@ class BN_layer(nn.Module):
         return self._forward_impl(x)
 
 
-def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+def resnet18(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
         progress (bool): If True, displays a progress bar of the download to stderr
     """
-    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress,
-                   **kwargs), BN_layer(AttnBasicBlock,2,**kwargs)
+    return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress, in_channels=in_channels,
+                   **kwargs), BN_layer(AttnBasicBlock,2,attention=attention,**kwargs)
 
 
 def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:

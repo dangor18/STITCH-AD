@@ -14,12 +14,16 @@ from torch.amp import autocast, GradScaler
 from torchvision import transforms
 import numpy as np
 
-from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2
-from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2
+import model_utils.efficientnet.decoder
+from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
+from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
+from model_utils.efficientnet import efficientnet_b0
+import model_utils.efficientnet
+#from model_utils.efficientnet.decoder import de_resnet50
 from model_utils.test import evaluation, test
 from model_utils.loss_fns import loss_concat, loss_function, loss_function_focal, loss_function_l2, loss_function_margin, loss_function_mse, loss_function_noise
 from model_utils.plots import plot_auroc
-from data.dataset_loader import CustomDataset
+from data.dataset_loader import CustomDataset, AddGaussianNoise
 
 from tqdm import tqdm
 
@@ -44,12 +48,18 @@ def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = Tru
     elif architecture == "resnet50":
         encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_resnet50(pretrained=False)
+    elif architecture == "resnet18":
+        encoder, bn = resnet18(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_resnet18(pretrained=False)
     elif architecture == "wide_resnet101_2":
         encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet101_2(pretrained=False)
     elif architecture == "asym":
         encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
         decoder = de_wide_resnet50_2(pretrained=False)
+    elif architecture == "efficientNet":
+        encoder, bn = efficientnet_b0(pretrained=True, outblocks=[3, 5, 15], outstrides=[8, 16, 32])
+        decoder = model_utils.efficientnet.decoder.de_wide_resnet50_2(pretrained=False)
     else:
         raise ValueError(f"Unknown model architecture: {architecture}")
     return encoder, bn, decoder
@@ -175,14 +185,14 @@ def train_normal(params, train_loader, test_loader, device):
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
+    encoder = encoder.float()
     decoder = decoder.to(device)
- 
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
     loss_fn = get_loss_fn(params)
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
-        step_size=30,
+        step_size=10,
         gamma=params["lr_factor"],
     )
 
@@ -225,12 +235,11 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % 2 == 0:
             if params["loss_weight_score"]:
                 temp = params["loss_weights"]
             else:
                 temp = [1.0, 1.0, 1.0]
-            print(temp)
             total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=temp,
                                                          weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
             
@@ -256,12 +265,11 @@ def get_loaders(params):
                 transforms.RandomHorizontalFlip(p=params["flip"]),
                 transforms.RandomVerticalFlip(p=params["flip"]),
                 transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
-                #transforms.ColorJitter(brightness=params["brightness"], contrast=params["contrast"]),
-                #transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+                transforms.ColorJitter(contrast=(0.9, 1.1)),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
                 #transforms.RandomErasing(p=params["erasing"], scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
                 #transforms.ElasticTransform(),
-                #transforms.RandomRotation(degrees=params["degrees"]),
-                #transforms.RandomInvert(p=0.0),
+                transforms.RandomRotation(degrees=params["degrees"]),
     ])  
     train_data = CustomDataset(
         params["meta_path"] + "train_metadata.json", 
@@ -279,7 +287,8 @@ def get_loaders(params):
         shuffle=True,
         num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=2
     )
     test_data = CustomDataset(
         params["meta_path"] + "test_metadata.json",
