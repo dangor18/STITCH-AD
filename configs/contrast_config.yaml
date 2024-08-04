@@ -1,0 +1,27 @@
+data_path: data/chunks/DRGB_80/
+meta_path: data/chunks/DRGB_80/metadata/
+log_path: logs/test.txt
+resize_x: 256
+resize_y: 256
+channels: 3
+
+model_path: checkpoints/model.pth
+architecture: "wide_resnet50_2"
+bn_attention: CBAM
+
+loss_weights: [0.95, 0.8, 0.67]
+score_weights: [0.42, 0.58]
+proj_loss_weight: 0.2
+contrast_weight: 0.1
+reconstruct_weight: 0.01
+
+num_epochs: 100
+batch_size: 32
+proj_lr: 0.0001
+proj_lr_factor: 0.333
+distill_lr: 0.0001
+distill_lr_factor: 0.333
+beta1_proj: 0.9856991576085923
+beta2_proj: 0.9907935289246718
+beta1_distill: 0.9856991576085923
+beta2_distill: 0.9907935289246718

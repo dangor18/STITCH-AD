@@ -14,16 +14,12 @@ from torch.amp import autocast, GradScaler
 from torchvision import transforms
 import numpy as np
 
-import model_utils.efficientnet.decoder
-from model_utils.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
-from model_utils.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
-from model_utils.efficientnet import efficientnet_b0
-import model_utils.efficientnet
-#from model_utils.efficientnet.decoder import de_resnet50
-from model_utils.test import evaluation, test
-from model_utils.loss_fns import loss_concat, loss_function, loss_function_focal, loss_function_l2, loss_function_margin, loss_function_mse, loss_function_noise
+from model.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
+from model.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
+from model_utils.test_utils import evaluation, test
 from model_utils.plots import plot_auroc
-from data.dataset_loader import CustomDataset, AddGaussianNoise
+from data.DL_RD import CustomDataset, AddGaussianNoise
+from model_utils.train_utils import loss_function
 
 from tqdm import tqdm
 
@@ -70,7 +66,6 @@ def get_optimizer(config, model_params = None):
             model_params, 
             lr=config["learning_rate"], 
             betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
-            weight_decay=config["weight_decay"]
         )
     elif str(config.get("optimizer", None)).upper() == "SGD":
         return torch.optim.SGD(
@@ -90,7 +85,7 @@ def get_optimizer(config, model_params = None):
     else:
         print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
         return None
-
+'''
 def get_loss_fn(params):
     if params["loss_function"] == "cosine":
         return lambda a, b: loss_function(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]))
@@ -109,7 +104,7 @@ def get_loss_fn(params):
     else:
         print("[ERROR] UNKNOWN LOSS FUNCTION")
         return None
-
+'''
 def train_tuning(params, trial):
     """
     Train with hyperparameter tuning (no logs, no model saves, no printing to console)
@@ -125,7 +120,7 @@ def train_tuning(params, trial):
     decoder = decoder.to(device)
 
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
-    loss_fn = get_loss_fn(params)
+    #loss_fn = get_loss_fn(params)
     
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(
@@ -147,7 +142,7 @@ def train_tuning(params, trial):
             with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_fn(inputs, outputs)
+                loss = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -185,10 +180,9 @@ def train_normal(params, train_loader, test_loader, device):
     encoder = encoder.to(device)
     bn = bn.to(device)
     encoder.eval()
-    encoder = encoder.float()
     decoder = decoder.to(device)
     optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
-    loss_fn = get_loss_fn(params)
+    #loss_fn = get_loss_fn(params)
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
@@ -216,7 +210,7 @@ def train_normal(params, train_loader, test_loader, device):
             with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_fn(inputs, outputs)
+                loss = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -241,7 +235,7 @@ def train_normal(params, train_loader, test_loader, device):
             else:
                 temp = [1.0, 1.0, 1.0]
             total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=temp,
-                                                         weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"))
+                                                         score_weight=params.get("score_weight", 1.0), score_mode=params.get("score_mode", "a"))
             
             # collect aurocs for each orchard and total for plotting
             auroc_dict[epoch+1] = orchard_auroc_dict
@@ -256,7 +250,7 @@ def train_normal(params, train_loader, test_loader, device):
             
             scheduler.step()
     
-    test(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
+    test(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 1.0), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
     plot_auroc(auroc_dict)
     return best_auroc
 
@@ -265,18 +259,18 @@ def get_loaders(params):
                 transforms.RandomHorizontalFlip(p=params["flip"]),
                 transforms.RandomVerticalFlip(p=params["flip"]),
                 transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
-                transforms.ColorJitter(contrast=(0.9, 1.1)),
-                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
+                #transforms.ColorJitter(contrast=(0.9, 1.1)),
+                #transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
                 #transforms.RandomErasing(p=params["erasing"], scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
                 #transforms.ElasticTransform(),
-                transforms.RandomRotation(degrees=params["degrees"]),
+                #transforms.RandomRotation(degrees=params["degrees"]),
     ])  
     train_data = CustomDataset(
         params["meta_path"] + "train_metadata.json", 
         params["data_path"], 
         transform_fn, 
         (params["resize_x"], params["resize_y"]), 
-        noise_factor=params["noise_factor"], 
+        noise_factor=0,
         p=params["flip"],
         norm_choice=params["norm_choice"],
         channels=params.get("channels", 3)
@@ -331,30 +325,12 @@ def objective(trial):
 
     params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
     params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
-    params["score_weights"] = [params["score_weight"], 1 - params["score_weight"]]
-    params["score_mode"] = trial.suggest_categorical("score_mode", ["a", "mul"])
-
-    params["loss_function"] = trial.suggest_categorical("loss_function", [
-        "cosine", "concat", "margin", "l2", "noise", "mse", "focal"
-    ])
-    
-    if params["loss_function"] == "margin":
-        params["margin"] = trial.suggest_float("margin", 0.05, 0.5)
-    elif params["loss_function"] == "l2":
-        params["l2_lambda"] = trial.suggest_float("l2_lambda", 0.001, 0.1, log=True)
-    elif params["loss_function"] == "noise":
-        params["noise_factor"] = trial.suggest_float("noise_factor", 0.01, 0.5, log=True)
-    elif params["loss_function"] == "mse":
-        params["mse_weight"] = trial.suggest_float("mse_weight", 0.1, 1.0)
-    elif params["loss_function"] == "focal":
-        params["gamma"] = trial.suggest_float("gamma", 0.5, 5.0)
-        params["alpha"] = trial.suggest_float("alpha", 0.1, 0.9)
 
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", default="configs/model_config.yaml", required=False)
+    parser.add_argument("--config", default="configs/RD_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     args = parser.parse_args()
 
@@ -362,6 +338,7 @@ if __name__ == '__main__':
 
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
+    setup_seed(111)
 
     # tune with optuna or train with default parameters from config file
     if args.tune is True:

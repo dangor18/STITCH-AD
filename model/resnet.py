@@ -1,4 +1,5 @@
 import torch
+import math
 from torch import Tensor
 import torch.nn as nn
 try:
@@ -35,67 +36,131 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1, bias = False) -> n
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=bias)
 
+class CrossChannelAttention(nn.Module):
+    def __init__(self, in_channels, reduction_ratio=8):
+        super(CrossChannelAttention, self).__init__()
+        self.in_channels = in_channels
+        self.reduction_ratio = reduction_ratio
+        
+        self.query_conv = nn.Conv1d(in_channels, in_channels // reduction_ratio, 1)
+        self.key_conv = nn.Conv1d(in_channels, in_channels // reduction_ratio, 1)
+        self.value_conv = nn.Conv1d(in_channels, in_channels, 1)
+        
+        self.gamma = nn.Parameter(torch.zeros(1))
+        
+        # Add layer normalization
+        self.layer_norm = nn.LayerNorm(in_channels)
+        
+    def forward(self, x):
+        batch_size, C, H, W = x.size()
+        
+        # Apply layer normalization
+        x = x.permute(0, 2, 3, 1).contiguous()
+        x = self.layer_norm(x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+        
+        x_flat = x.view(batch_size, C, -1)
+        
+        query = self.query_conv(x_flat).permute(0, 2, 1)
+        key = self.key_conv(x_flat)
+        value = self.value_conv(x_flat)
+        
+        energy = torch.bmm(query, key)
+        
+        # Apply softmax with temperature scaling
+        attention = nn.functional.softmax(energy / (self.in_channels ** 0.5), dim=-1)
+        
+        out = torch.bmm(value, attention.permute(0, 2, 1))
+        out = out.view(batch_size, C, H, W)
+        
+        out = self.gamma * out + x
+        
+        return out
+
+class SELayer(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super(SELayer, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, w, h = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class GCModule(nn.Module):
+    def __init__(self, channel, reduction=16):
+        super().__init__()
+        self.conv = nn.Conv2d(channel, 1, kernel_size=1)
+        self.softmax = nn.Softmax(dim=2)
+        self.transform = nn.Sequential(
+            nn.Conv2d(channel, channel // reduction, kernel_size=1),
+            nn.LayerNorm([channel // reduction, 1, 1]),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // reduction, channel, kernel_size=1)
+        )
+    
+    def context_modeling(self, x):
+        b, c, h, w = x.shape
+        input_x = x
+        input_x = input_x.reshape(b, c, h * w)
+        context = self.conv(x)
+        context = context.reshape(b, 1, h * w).transpose(1, 2)
+        out = torch.matmul(input_x, context)
+        out = out.reshape(b, c, 1, 1)
+        return out
+    
+    def forward(self, x):
+        context = self.context_modeling(x)
+        y = self.transform(context)
+        return x + y
+
 class ChannelAttention(nn.Module):
-    def __init__(self, in_planes, ratio=16):
+    def __init__(self, channel, reduction=16):
         super(ChannelAttention, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.fc1 = nn.Conv2d(in_planes, in_planes // ratio, 1, bias=False)
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Conv2d(in_planes // ratio, in_planes, 1, bias=False)
+        self.fc = nn.Sequential(
+            nn.Conv2d(channel, channel // reduction, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel // reduction, channel, 1, bias=False)
+        )
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        avg_out = self.fc2(self.relu1(self.fc1(self.avg_pool(x))))
-        max_out = self.fc2(self.relu1(self.fc1(self.max_pool(x))))
+        avg_out = self.fc(self.avg_pool(x))
+        max_out = self.fc(self.max_pool(x))
         out = avg_out + max_out
-        return self.sigmoid(out)
+        return x * self.sigmoid(out)
 
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
         super(SpatialAttention, self).__init__()
-        self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         avg_out = torch.mean(x, dim=1, keepdim=True)
         max_out, _ = torch.max(x, dim=1, keepdim=True)
-        x = torch.cat([avg_out, max_out], dim=1)
-        x = self.conv1(x)
-        return self.sigmoid(x)
-
-class CBAM(nn.Module):
-    def __init__(self, channels, ratio=16, kernel_size=7):
-        super(CBAM, self).__init__()
-        self.ca = ChannelAttention(channels, ratio)
-        self.sa = SpatialAttention(kernel_size)
-
-    def forward(self, x):
-        x = x * self.ca(x)
-        x = x * self.sa(x)
-        return x
+        out = torch.concat([avg_out, max_out], dim=1)
+        out = self.conv(out)
+        return x * self.sigmoid(out) 
     
-class ChannelReductionCBAM(nn.Module):
-    def __init__(self, in_channels, out_channels=3, ratio=16, kernel_size=7, emphasis_channel=0, weight=1):
-        super(ChannelReductionCBAM, self).__init__()
-        self.reduction = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
-        self.emphasis_channel = emphasis_channel
-        
-        self.ca = ChannelAttention(out_channels, ratio)
+class CBAM(nn.Module):
+    def __init__(self, channel, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channel, reduction)
         self.sa = SpatialAttention(kernel_size)
-        
-        # Initialize the emphasis weights
-        self.emphasis_weights = nn.Parameter(torch.ones(out_channels))
-        self.emphasis_weights.data[emphasis_channel] *= weight
-        
+    
     def forward(self, x):
-        x = self.reduction(x)
-        
-        # Apply channel emphasis
-        x = x * self.emphasis_weights.view(1, -1, 1, 1)
-        
-        x = x * self.ca(x)
-        x = x * self.sa(x)
+        x = self.ca(x)
+        x = self.sa(x)
         return x
 
 class BasicBlock(nn.Module):
@@ -184,7 +249,7 @@ class Bottleneck(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
-        self.dropout = nn.Dropout(p=0.0)
+        #self.dropout = nn.Dropout(p=0.0)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -380,7 +445,7 @@ class AttnBasicBlock(nn.Module):
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        attention: bool = True,
+        attention: Union[bool, str] = True,
     ) -> None:
         super(AttnBasicBlock, self).__init__()
         self.attention = attention
@@ -436,7 +501,7 @@ class AttnBottleneck(nn.Module):
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        attention: bool = True,
+        attention: Union[bool, str] = True,
     ) -> None:
         super(AttnBottleneck, self).__init__()
         self.attention = attention
@@ -452,15 +517,23 @@ class AttnBottleneck(nn.Module):
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
-        self.cbam = CBAM(inplanes, 16)
+        # attention blocks
+        if self.attention == "CBAM":
+            self.attention_block = CBAM(inplanes)
+        elif self.attention == "GC":
+            self.attention_block = GCModule(inplanes)
+        elif self.attention == "CROSS":
+            self.attention_block = CrossChannelAttention(inplanes)
+        elif self.attention == "SE":
+            self.attention_block = SELayer(inplanes)
         self.downsample = downsample
         self.stride = stride
-        self.dropout = nn.Dropout(p=0.0)
+        # Add gradient clipping
+        self.clip_value = 1.0
 
     def forward(self, x: Tensor) -> Tensor:
-        if self.attention:
-            x = self.cbam(x)
-            #x = self.dropout(x)
+        if self.attention is not False:
+            x = self.attention_block(x)
 
         identity = x
 
@@ -493,7 +566,7 @@ class BN_layer(nn.Module):
                  groups: int = 1,
                  width_per_group: int = 64,
                  norm_layer: Optional[Callable[..., nn.Module]] = None,
-                 attention: bool = True
+                 attention: Union[bool, str] = True
                  ):
         super(BN_layer, self).__init__()
 
@@ -566,7 +639,7 @@ class BN_layer(nn.Module):
         return self._forward_impl(x)
 
 
-def resnet18(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
+def resnet18(pretrained: bool = False, progress: bool = True, attention: Union[bool, str] = False, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -588,7 +661,7 @@ def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> 
                    **kwargs), BN_layer(AttnBasicBlock,3,**kwargs)
 
 
-def resnet50(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
+def resnet50(pretrained: bool = False, progress: bool = True, attention: Union[bool, str] = False, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     Args:
@@ -647,7 +720,7 @@ def resnext101_32x8d(pretrained: bool = False, progress: bool = True, **kwargs: 
                    pretrained, progress, **kwargs)
 
 
-def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
+def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: Union[bool, str] = False, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-50-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels
@@ -663,7 +736,7 @@ def wide_resnet50_2(pretrained: bool = False, progress: bool = True, attention: 
     return _resnet('wide_resnet50_2', Bottleneck, [3, 4, 6, 3], pretrained, progress, in_channels, **kwargs), BN_layer(AttnBottleneck,3, attention=attention, **kwargs)
 
 
-def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention: bool = True, in_channels: int = 3, **kwargs: Any) -> ResNet:
+def wide_resnet101_2(pretrained: bool = False, progress: bool = True, attention: Union[bool, str] = False, in_channels: int = 3, **kwargs: Any) -> ResNet:
     r"""Wide ResNet-101-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_.
     The model is the same as ResNet except for the bottleneck number of channels

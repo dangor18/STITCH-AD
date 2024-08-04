@@ -99,8 +99,8 @@ def calculate_mean_std(orchard_path: str) -> Tuple[np.ndarray, np.ndarray]:
     file_list = [os.path.join(root, f) for root, _, files in os.walk(orchard_path) 
                  for f in files if f.endswith('.npy')]
     
-    data_sum = np.zeros(3)
-    data_sq_sum = np.zeros(3)
+    data_sum = np.zeros(4)
+    data_sq_sum = np.zeros(4)
     total_pixels = 0
     
     for file in file_list:
