@@ -21,7 +21,7 @@ proj_lr: 0.0001
 proj_lr_factor: 0.333
 distill_lr: 0.0001
 distill_lr_factor: 0.333
-beta1_proj: 0.9856991576085923
-beta2_proj: 0.9907935289246718
-beta1_distill: 0.9856991576085923
-beta2_distill: 0.9907935289246718
+beta1_proj: 0.5
+beta2_proj: 0.999
+beta1_distill: 0.5
+beta2_distill: 0.999

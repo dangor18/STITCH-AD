@@ -1,9 +1,9 @@
-data_path: data/chunks/DRGB_80/
-meta_path: data/chunks/DRGB_80/metadata/
+data_path: data/chunks/D_80/
+meta_path: data/chunks/D_80/metadata/
 log_path: logs/new.txt
 resize_x: 256
 resize_y: 256
-channels: 3
+channels: 1
 flip: 0.3
 crop_min: 0.9
 norm_choice: "IMAGE_NET"

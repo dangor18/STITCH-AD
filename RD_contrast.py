@@ -36,7 +36,7 @@ def get_loaders(params):
         train_data, 
         batch_size=params["batch_size"], 
         shuffle=True,
-        num_workers=4,
+        num_workers=1,
         pin_memory=True,
         persistent_workers=True,
     )
@@ -239,10 +239,10 @@ def objective(trial):
     params["distill_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
     params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
-    params["beta1_proj"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
-    params["beta2_proj"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
-    params["beta1_distill"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
-    params["beta2_distill"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
+    #params["beta1_proj"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+    #params["beta2_proj"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
+    #params["beta1_distill"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+    #params["beta2_distill"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
     # distill loss weights (3 levels)
     #params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
