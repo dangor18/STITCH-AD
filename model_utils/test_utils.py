@@ -11,6 +11,7 @@ from statistics import mean
 from scipy.ndimage import gaussian_filter
 import pickle
 from model_utils.plots import plot_sample, plot_histogram
+from sklearn.metrics import PrecisionRecallDisplay
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul', weights=[1.0, 1.0, 1.0]):
     """
@@ -274,6 +275,16 @@ def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_p
         print(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
         plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_normal"], orchard_id)
 
+        if auroc_case1:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case1"], name="CASE 1 PRECISION RECALL").plot()
+        if auroc_case2:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case2"], name="CASE 2 PRECISION RECALL").plot()
+        if auroc_case3:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case3"], name="CASE 3 PRECISION RECALL").plot()
+                
         for i in range(len(orchard_patch_results[orchard_id]["img"])):
             plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
 
