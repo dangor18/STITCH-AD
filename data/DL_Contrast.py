@@ -145,10 +145,10 @@ class train_dataset(Dataset):
         else:
             input["clsname"] = filename.split("/")[-4]
 
-        print(normal_image)
-        print(img_noise)
-        self.plot_channels(normal_image, "Original Image Channels")
-        self.plot_channels(img_noise, "Noisy Image Channels")
+        #print(normal_image)
+        #print(img_noise)
+        #self.plot_channels(normal_image, "Original Image Channels")
+        #self.plot_channels(img_noise, "Noisy Image Channels")
 
         return input
     
