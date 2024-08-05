@@ -36,7 +36,7 @@ def get_loaders(params):
         train_data, 
         batch_size=params["batch_size"], 
         shuffle=True,
-        num_workers=1,
+        num_workers=4,
         pin_memory=True,
         persistent_workers=True,
     )
