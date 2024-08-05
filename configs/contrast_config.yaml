@@ -7,18 +7,18 @@ channels: 3
 
 model_path: checkpoints/model.pth
 architecture: "wide_resnet50_2"
-bn_attention: CBAM
+bn_attention: False
 
 loss_weights: [1.0, 1.0, 1.0]
-score_weight: 1.0
+score_weight: 0.0
 proj_loss_weight: 0.2
 contrast_weight: 0.1
 reconstruct_weight: 0.01
 
 num_epochs: 100
 batch_size: 32
-proj_lr: 0.0001
-distill_lr: 0.0001
+proj_lr: 0.001
+distill_lr: 0.005
 proj_lr_factor: 0.333
 distill_lr_factor: 0.333
 beta1_proj: 0.5

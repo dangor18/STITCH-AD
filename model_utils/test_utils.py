@@ -89,7 +89,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode, weights=temp)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
-            anomaly_score = score_weight * np.max(anomaly_map) + (1 - score_weight) * np.average(anomaly_map)
+            anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
             #max_anomaly_score = max(max_anomaly_score, anomaly_score)
            
             if label == 1:  # case_1 anomaly
@@ -311,7 +311,7 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
-            anomaly_score = score_weight * np.max(anomaly_map) + (1 - score_weight) * np.average(anomaly_map)
+            anomaly_score = np.max(anomaly_map) + score_weight *  np.average(anomaly_map)
             #max_anomaly_score = max(max_anomaly_score, anomaly_score)
            
             if label == 1:  # case_1 anomaly

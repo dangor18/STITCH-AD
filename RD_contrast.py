@@ -111,7 +111,7 @@ def train_tuning(params, trial):
                 optimizer_proj.zero_grad()
                 optimizer_distill.zero_grad()
         
-        total_auroc, _ = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]))        
+        total_auroc, _ = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, score_weight=params.get("score_weight"))      
 
         if total_auroc > best_auroc:
             best_auroc = total_auroc
@@ -200,12 +200,12 @@ def train(params, train_loader, test_loader, device):
         avg_loss_distill = loss_distill_sum / len(train_loader)
         avg_total_loss = total_loss_sum / len(train_loader)
 
-        print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
         with open(params["log_path"], "a") as log_file:
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
-        total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], weights=params.get("score_weights", [1.0, 0.0]))        
+        total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"))        
         auroc_dict[epoch+1] = orchard_auroc_dict
+        print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
         if total_auroc > best_auroc:
             best_auroc = total_auroc
@@ -233,9 +233,9 @@ def objective(trial):
         params = yaml.safe_load(ymlfile)
 
     # objective function params
-    params["proj_lr"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    params["proj_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
     params["proj_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
-    params["distill_lr"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    params["distill_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
     params["distill_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
     params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
@@ -251,7 +251,7 @@ def objective(trial):
     #params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
     #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
     # score weight (max and avg of anomaly map)
-    #params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
+    #params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
     # weight for proj loss in total loss
     #params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
     # weight for these losses in proj loss
