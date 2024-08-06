@@ -40,7 +40,7 @@ class inference_dataset(Dataset):
                 self.metas.append(meta)
         
         # NOTE: be careful of this
-        self.metas.shuffle()    # shuffle the meta data to properly mix in the train and test set (get all patches then in one loader)
+        self.metas = shuffle(self.metas)    # shuffle the meta data to properly mix in the train and test set (get all patches then in one loader)
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def __len__(self):

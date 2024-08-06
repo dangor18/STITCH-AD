@@ -8,22 +8,23 @@ from model.de_resnet import de_wide_resnet50_2
 from argparse import ArgumentParser
 import yaml
 from sklearn.ensemble import IsolationForest
-from sklearn.cluster import KMeans
+from sklearn.cluster import DBSCAN
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from scipy.stats import zscore
 import random
 from data.DL_inference import inference_dataset
 
 gt_dict = {
-    "1676": 1,
-    "1883": 0,
-    "1996": 1,
-    "2057": 1,
-    "1724": 1,
-    "2222": 0,
-    "2227": 0,
-    "2228": 0,
-    "22240": 0,
-    "2848": 0,
+    "1676": -1,
+    "1883": 1,
+    "1996": -1,
+    "2057": -1,
+    "1724": -1,
+    "2222": 1,
+    "2227": 1,
+    "2228": 1,
+    "2240": 1,
+    "2848": 1,
 }
 
 def get_loaders(params):
@@ -39,7 +40,7 @@ def get_loaders(params):
     return data_loader
 
 def load_model(model_type: str, model_path: str, in_channels: int, device):
-    encoder, bn = wide_resnet50_2(pretrained=True, attention=True, in_channels= in_channels)
+    encoder, bn = wide_resnet50_2(pretrained=True, attention=params["bn_attention"], in_channels=in_channels)
     encoder = encoder.to(device)
     bn = bn.to(device)
     decoder = de_wide_resnet50_2(pretrained=False).to(device)
@@ -71,14 +72,6 @@ def load_model(model_type: str, model_path: str, in_channels: int, device):
     else:
         print("[ERROR] UNKOWN MODEL")
         return None
-
-def IQR(patch_scores):
-    # return the upper and lower bounds of a list of patch scores
-    q3, q1 = np.percentile(patch_scores, [75 ,25])
-    iqr = q3 - q1
-    lower_bound = q1 - (1.5 * iqr)
-    upper_bound = q3 + (1.5 * iqr)
-    return lower_bound, upper_bound
 
 def normalize(patches):
     '''
@@ -117,9 +110,9 @@ def infer_iso_forest(params, data_loader, device):
     pr_dict = {}
     fit_scores = []     # scores to fit the isolation forest
     if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model("RD", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
     else:
-        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["channels"], device)
     
     # initialize isolation forest
     clf = IsolationForest(contamination=params["contamination"], random_state=42)
@@ -127,10 +120,10 @@ def infer_iso_forest(params, data_loader, device):
     for input in data_loader:
         patch = input['image'].to(device)
         orchard_id = input['clsname'][0]
-        if score_dict.get(orchard_id) is None:
+        if score_dict.get(orchard_id) is None:  # new orchard
             score_dict[orchard_id] = []
         with torch.no_grad():
-            if params["model_type"] == "RD":
+            if params["model_type"] == "RD":    # get score from model and add to list
                 inputs = encoder(patch)
                 outputs = decoder(bn(inputs))
                 score = cal_anomaly_map(inputs, outputs, amap_mode='a', weights=params["loss_weights"])
@@ -142,24 +135,25 @@ def infer_iso_forest(params, data_loader, device):
                 score = cal_anomaly_map(inputs, outputs, amap_mode='a', weights=params["loss_weights"])
                 score_dict[orchard_id].append(score.cpu())
     
-    min_size = min(len(value) for value in score_dict.values())
+    #min_size = min(len(value) for value in score_dict.values())
     for orchard_id, scores in score_dict.items():
-        scores = normalize(np.array(scores))        # normalize
-        scores = divide_scores(scores, min_size)    # segment scores
-        sample = random.sample(scores, len(scores) // 4)  # take a quarter of the scores for each orchard to fit the isolation forest
-        for s in sample:
-            fit_scores.append(s)
-        
-    clf.fit(np.array(fit_scores).reshape(-1, 1))    # fit the isolation forest
+        #scores = normalize(np.array(scores))        # normalize
+        #scores = divide_scores(scores, min_size)    # segment scores
+        #sample = random.sample(scores, len(scores) // 4)  # take a quarter of the scores for each orchard to fit the isolation forest
+        #for s in sample:
+            #fit_scores.append(s)
+        clf.fit(np.array(scores).reshape(-1, 1))    # fit the isolation forest
+        pr_dict[orchard_id] = clf.predict(np.array(scores).reshape(-1, 1))
+    #clf.fit(np.array(fit_scores).reshape(-1, 1))    # fit the isolation forest
     # now predict on each segment per orchard and get the final prediction
-    for orchard_id, scores in score_dict.items():
-        for s in scores:
-            pr = clf.predict(s.reshape(-1, 1))
-            pr_dict[orchard_id] = 1 if -1 in pr else 0
+    #for orchard_id, scores in score_dict.items():
+        #for s in scores:
+            #pr = clf.predict(s.reshape(-1, 1))
+            #pr_dict[orchard_id] = 1 if -1 in pr else 0
         
     return pr_dict
 
-def infer_IQR(params, data_loader, device):
+def infer_zstat(params, data_loader, device):
     '''
         Perform orchard level inference using IQR
         ARGS:
@@ -171,9 +165,9 @@ def infer_IQR(params, data_loader, device):
     score_dict = {}
     pr_dict = {}
     if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model("RD", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
     else:
-        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["channels"], device)
 
     for input in data_loader:
         patch = input['image'].to(device)
@@ -195,19 +189,15 @@ def infer_IQR(params, data_loader, device):
     
     #min_size = min(len(value) for value in score_dict.values())
     for orchard_id, scores in score_dict.items():
-        scores = normalize(np.array(scores))    # normalize
-        upper, lower = IQR(score_dict[orchard_id])  # get range
-        
-        # find outlier patches
-        outliers = [(scores < lower) | (scores > upper)]
-        if 1 / (len(outliers) // len(scores)) >= params["threshold"]: # percentage of outliers to total patches
+        z_scores = np.abs(zscore(scores))   # score normalization per orchard
+        if len(scores[z_scores > params["threshold"]]) > 0:    # if there are outliers
             pr_dict[orchard_id] = 1
         else:
-            pr_dict[orchard_id] = 0
+            pr_dict[orchard_id] = -1
     
     return pr_dict
 
-def infer_kmeans(params, data_loader, device):
+def infer_dbscan(params, data_loader, device):
     '''
         Perform orchard level inference using KMeans Clustering
         ARGS:
@@ -220,11 +210,11 @@ def infer_kmeans(params, data_loader, device):
     pr_dict = {}
     fit_scores = []     # scores to fit the isolation forest
     if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model("RD", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
     else:
-        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["in_channels"], device)
+        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["channels"], device)
     
-    kmeans = KMeans(n_clusters=2, random_state=42)  # Assuming 2 clusters: normal and anomalous
+    dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
 
     for input in data_loader:
         patch = input['image'].to(device)
@@ -244,43 +234,36 @@ def infer_kmeans(params, data_loader, device):
                 score = cal_anomaly_map(inputs, outputs, amap_mode='a', weights=params["loss_weights"])
                 score_dict[orchard_id].append(score.cpu())
     
-    min_size = min(len(value) for value in score_dict.values())
+    #min_size = min(len(value) for value in score_dict.values())
     for orchard_id, scores in score_dict.items():
-        scores = normalize(np.array(scores))        # normalize
-        scores = divide_scores(scores, min_size)    # segment scores
-        sample = random.sample(scores, len(scores) // 4)  # take a quarter of the scores for each orchard to fit the isolation forest
-        for s in sample:
-            fit_scores.append(s)
+        #scores = normalize(np.array(scores))        # normalize
+        #scores = divide_scores(scores, min_size)    # segment scores
+        #sample = random.sample(scores, len(scores) // 4)  # take a quarter of the scores for each orchard to fit the isolation forest
+        #for s in sample:
+            #fit_scores.append(s)
         
-    kmeans.fit(np.array(fit_scores).reshape(-1, 1)) # fit the kmeans
-
-    # Determine which cluster represents anomalies
-    cluster_centers = kmeans.cluster_centers_.flatten()
-    anomaly_cluster = np.argmax(cluster_centers)
-    # now predict on each segment per orchard and get the final prediction
-    for orchard_id, scores in score_dict.items():
-        for s in scores:
-            pr = kmeans.predict(s.reshape(-1, 1))   # TODO
-            pr_dict[orchard_id] = 1 if -1 in pr else 0
+        dbscan.fit(np.array(fit_scores).reshape(-1, 1))     # fit the kmeans
+        dbscan.labels_ = np.array(scores).reshape(-1, 1)    # get predictions
+        pr_dict[orchard_id] = dbscan.labels_
         
     return pr_dict
 
 if __name__ == "__main__":
     arg_parser = ArgumentParser()
-    arg_parser.add_argument("--config", type=str, default="config/inference.yaml")
+    arg_parser.add_argument("--config", type=str, default="configs/inference.yaml")
     args = arg_parser.parse_args()
     with open(args.config, "r") as f:
-        params = yaml.load(f, safe_load=True)
+        params = yaml.safe_load(f)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     data_loader = get_loaders(params)
-    if params["method"] == "IQR":
-        pr_dict = infer_IQR(params, data_loader, device)
-    elif params["method"] == "IsolationForest":
+    if params["method"] == "Z":
+        pr_dict = infer_zstat(params, data_loader, device)
+    elif params["method"] == "ISO_FOREST":
         pr_dict = infer_iso_forest(params, data_loader, device)
-    elif params["method"] == "KMeans":
-        pr_dict = infer_kmeans(params, data_loader, device)
+    elif params["method"] == "DBSCAN":
+        pr_dict = infer_dbscan(params, data_loader, device)
     else:
         print("[ERROR] UNKNOWN METHOD")
     

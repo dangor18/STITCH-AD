@@ -1,0 +1,18 @@
+data_path: data/chunks/D_80/
+meta_path: data/chunks/D_80/metadata/
+resize_x: 256
+resize_y: 256
+channels: 1
+
+model_type: RD
+model_path: checkpoints/model.pth
+architecture: "wide_resnet50_2"
+bn_attention: CBAM
+score_weight: 0.0
+
+# classifier params
+method: Z
+threshold: 3.0      # for z stat
+contamination: 0.01 # for isolation forest
+eps: 0.1            # for DBSCAN
+min_samples: 10     # for DBSCAN

@@ -10,7 +10,7 @@ norm_choice: "IMAGE_NET"
 
 model_path: checkpoints/RD.pth
 architecture: "wide_resnet50_2"
-bn_attention: SE
+bn_attention: CBAM
 optimizer: adam
 
 loss_weights: [0.95, 0.8, 0.67]
