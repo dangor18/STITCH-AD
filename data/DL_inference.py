@@ -34,13 +34,10 @@ class inference_dataset(Dataset):
                 self.metas.append(meta)
         
         with open(meta_file_2, "r") as f_r:
-            self.metas = []
             for line in f_r:
                 meta = json.loads(line)
                 self.metas.append(meta)
         
-        # NOTE: be careful of this
-        self.metas = shuffle(self.metas)    # shuffle the meta data to properly mix in the train and test set (get all patches then in one loader)
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def __len__(self):
@@ -78,23 +75,20 @@ class inference_dataset(Dataset):
 
             image = torch.from_numpy(image).float().permute(2, 0, 1)
 
-            input.update(
-                {
-                    "filename": filename,
-                    "label": label,
-                }
-            )
-            if meta.get("clsname", None):
-                input["clsname"] = meta["clsname"]
-            else:
-                input["clsname"] = filename.split("/")[-4]
-        
-            if self.transform_fn:
-                image = self.transform_fn(image)
+        input.update(
+            {
+                "filename": filename,
+                "label": label,
+            }
+        )
+        if meta.get("clsname", None):
+            input["clsname"] = meta["clsname"]
+        else:
+            input["clsname"] = filename.split("/")[-4]
 
-            # normalize
-            if self.normalize:
-                image = self.normalize(image)
+        # normalize
+        if self.normalize:
+            image = self.normalize(image)
 
         input.update({"image": image})
 

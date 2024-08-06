@@ -157,7 +157,7 @@ def train_tuning(params, trial):
                 temp = params["loss_weights"]
             else:
                 temp = [1.0, 1.0, 1.0]
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, weights=params.get("score_weights", [1.0, 0.0]), score_mode=params.get("score_mode", "a"), temp=temp)
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=temp)
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -230,12 +230,8 @@ def train_normal(params, train_loader, test_loader, device):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0:
-            if params["loss_weight_score"]:
-                temp = params["loss_weights"]
-            else:
-                temp = [1.0, 1.0, 1.0]
-            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=temp,
-                                                         score_weight=params.get("score_weight", 1.0), score_mode=params.get("score_mode", "a"))
+            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=params["loss_weights"],
+                                                         score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"))
             
             # collect aurocs for each orchard and total for plotting
             auroc_dict[epoch+1] = orchard_auroc_dict
@@ -250,7 +246,7 @@ def train_normal(params, train_loader, test_loader, device):
             
             scheduler.step()
     
-    test(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 1.0), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
+    test(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
     plot_auroc(auroc_dict)
     return best_auroc
 

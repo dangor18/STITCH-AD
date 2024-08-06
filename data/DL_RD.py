@@ -167,23 +167,23 @@ class CustomDataset(Dataset):
 
             image = torch.from_numpy(image).float().permute(2, 0, 1)
 
-            input.update(
-                {
-                    "filename": filename,
-                    "label": label,
-                }
-            )
-            if meta.get("clsname", None):
-                input["clsname"] = meta["clsname"]
-            else:
-                input["clsname"] = filename.split("/")[-4]
+        input.update(
+            {
+                "filename": filename,
+                "label": label,
+            }
+        )
+        if meta.get("clsname", None):
+            input["clsname"] = meta["clsname"]
+        else:
+            input["clsname"] = filename.split("/")[-4]
         
-            if self.transform_fn:
-                image = self.transform_fn(image)
+        if self.transform_fn:
+            image = self.transform_fn(image)
 
-            # normalize
-            if self.normalize:
-                image = self.normalize(image)
+        # normalize
+        if self.normalize:
+            image = self.normalize(image)
 
         input.update({"image": image})
 

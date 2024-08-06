@@ -14,7 +14,7 @@ bn_attention: CBAM
 optimizer: adam
 
 loss_weights: [0.95, 0.8, 0.67]
-score_weights: [0.42, 0.58]
+score_weight: 0.1
 
 num_epochs: 100
 batch_size: 32

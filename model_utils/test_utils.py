@@ -175,10 +175,10 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
 
 def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_per_class=5, score_mode='a'):
     """
-    Evaluate the model for multiple anomaly types
+        Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     # load the best model after training
-    ckp = torch.load("checkpoints/model.pth")
+    ckp = torch.load("checkpoints/RD.pth")
     for k, v in list(ckp['bn'].items()):
         if 'memory' in k:
             ckp['bn'].pop(k)
@@ -288,7 +288,7 @@ def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_p
 
 def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, score_mode='a', temp=[1.0, 1.0, 1.0]):
     """
-    Evaluate the model for multiple anomaly types
+        Evaluate the model for multiple anomaly types
     """
     encoder.eval()
     proj.eval()
@@ -407,10 +407,10 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
 
 def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_per_class=5, score_mode='a'):
     """
-    Evaluate the model for multiple anomaly types
+        Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     # load the best model after training
-    ckp = torch.load("checkpoints/model.pth")
+    ckp = torch.load("checkpoints/RDProj.pth")
     for k, v in list(ckp['bn'].items()):
         if 'memory' in k:
             ckp['bn'].pop(k)
@@ -447,7 +447,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weigh
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
-            anomaly_score = score_weight * np.max(anomaly_map) + score_weight * np.average(anomaly_map)
+            anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
             #max_anomaly_score = max(max_anomaly_score, anomaly_score)
             if plot_count[orchard_id][label] < n_plot_per_class:
                 plot_count[orchard_id][label] += 1

@@ -5,14 +5,17 @@ resize_y: 256
 channels: 1
 
 model_type: RD
-model_path: checkpoints/model.pth
+model_path: checkpoints/RD.pth
 architecture: "wide_resnet50_2"
 bn_attention: CBAM
-score_weight: 0.0
+score_weight: 0.3
+loss_weights: [0.95, 0.8, 0.67]
 
 # classifier params
-method: Z
-threshold: 3.0      # for z stat
-contamination: 0.01 # for isolation forest
-eps: 0.1            # for DBSCAN
-min_samples: 10     # for DBSCAN
+method: DBSCAN
+threshold: 3.5        # for z stat
+contamination: 0.05   # for isolation forest
+forest_threshold: 10  # for isolation forest
+eps: 0.1              # for DBSCAN
+min_samples: 10       # for DBSCAN
+min_score: 0.5        # for DBSCAN
