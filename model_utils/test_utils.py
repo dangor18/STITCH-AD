@@ -517,13 +517,13 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weigh
             # plot precision recall
             if auroc_case1:
                 PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case1"], name="CASE 1 PRECISION RECALL").plot()
+                                                            orchard_data["pr_normal"] + orchard_data["pr_case1"], name=f"ORCHARD {orchard_id}: CASE 1 PRECISION RECALL").plot()
             if auroc_case2:
                 PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case2"], name="CASE 2 PRECISION RECALL").plot()
+                                                            orchard_data["pr_normal"] + orchard_data["pr_case2"], name=f"ORCHARD {orchard_id}: CASE 2 PRECISION RECALL").plot()
             if auroc_case3:
                 PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case3"], name="CASE 3 PRECISION RECALL").plot()
+                                                            orchard_data["pr_normal"] + orchard_data["pr_case3"], name=f"ORCHARD {orchard_id}: CASE 3 PRECISION RECALL").plot()
                     
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
