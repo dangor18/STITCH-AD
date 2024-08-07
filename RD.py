@@ -153,11 +153,7 @@ def train_tuning(params, trial):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0:
-            if params["loss_weight_score"]:
-                temp = params["loss_weights"]
-            else:
-                temp = [1.0, 1.0, 1.0]
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=temp)
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=params["loss_weights"])
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -254,7 +250,7 @@ def get_loaders(params):
     transform_fn = transforms.Compose([
                 transforms.RandomHorizontalFlip(p=params["flip"]),
                 transforms.RandomVerticalFlip(p=params["flip"]),
-                transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
+                #transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
                 #transforms.ColorJitter(contrast=(0.9, 1.1)),
                 #transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
                 #transforms.RandomErasing(p=params["erasing"], scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
@@ -295,7 +291,7 @@ def get_loaders(params):
 # objective function for optuna
 def objective(trial):
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", default="configs/model_config.yaml", required=False)
+    parser.add_argument("--config", default="configs/RD_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     args = parser.parse_args()
 
@@ -305,21 +301,20 @@ def objective(trial):
         params = yaml.safe_load(ymlfile)
 
     #params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
-    #params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
-    #params["patience"] = trial.suggest_int("patience", low=2, high=10, step=1)
+    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
     #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    params["bn_attention"] = trial.suggest_categorical("bn_attention", [True, False])
-    #params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
-    #params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
+    params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "GC", "SE"])
+    params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+    params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
     params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
     params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
     params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
     params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
 
-    params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
+    #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
     params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
 
     return train_tuning(params, trial)

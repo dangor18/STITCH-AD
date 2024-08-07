@@ -1,9 +1,9 @@
-data_path: data/chunks/D_80/
-meta_path: data/chunks/D_80/metadata/
+data_path: data/chunks/DRGB_80/
+meta_path: data/chunks/DRGB_80/metadata/
 log_path: logs/new.txt
 resize_x: 256
 resize_y: 256
-channels: 1
+channels: 3
 flip: 0.3
 crop_min: 0.9
 norm_choice: "IMAGE_NET"
@@ -13,12 +13,12 @@ architecture: "wide_resnet50_2"
 bn_attention: CBAM
 optimizer: adam
 
-loss_weights: [0.95, 0.8, 0.67]
-score_weight: 0.1
+loss_weights: [0.82, 0.92, 1.44]
+score_weight: 0.2
 
-num_epochs: 100
+num_epochs: 75
 batch_size: 32
-learning_rate: 0.0069
+learning_rate: 0.005
 lr_factor: 0.333
-beta1: 0.9856991576085923
-beta2: 0.9907935289246718
+beta1: 0.98
+beta2: 0.999

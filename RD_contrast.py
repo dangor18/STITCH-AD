@@ -233,12 +233,12 @@ def objective(trial):
         params = yaml.safe_load(ymlfile)
 
     # objective function params
-    params["proj_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
-    params["proj_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
-    params["distill_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
-    params["distill_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
-    params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
+    #params["proj_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
+    #params["proj_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
+    #params["distill_lr"] = trial.suggest_float("learning_rate", low=1e-4, high=1e-1, log=True)
+    #params["distill_lr_factor"] = trial.suggest_float("lr_factor", low=0.0, high=0.6)
+    #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
+    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
     #params["beta1_proj"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
     #params["beta2_proj"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
     #params["beta1_distill"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
@@ -253,10 +253,10 @@ def objective(trial):
     # score weight (max and avg of anomaly map)
     #params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
     # weight for proj loss in total loss
-    #params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
+    params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
     # weight for these losses in proj loss
-    #params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
-    #params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
+    params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
+    params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
 
     return train_tuning(params, trial)
 
