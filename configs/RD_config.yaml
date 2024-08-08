@@ -1,5 +1,5 @@
-data_path: data/chunks/DRGB_80/
-meta_path: data/chunks/DRGB_80/metadata/
+data_path: data/chunks/DRGB_80v2/
+meta_path: data/chunks/DRGB_80v2/metadata/
 log_path: logs/new.txt
 resize_x: 256
 resize_y: 256

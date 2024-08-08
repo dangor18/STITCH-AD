@@ -301,21 +301,21 @@ def objective(trial):
         params = yaml.safe_load(ymlfile)
 
     #params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
-    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.9)
+    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.5)
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
     #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "GC", "SE"])
+    params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE"])
     params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
     params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
-    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
-    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
-    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
+    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.3)
+    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.3)
+    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.3)
     params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
 
     #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
-    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
+    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
 
     return train_tuning(params, trial)
 

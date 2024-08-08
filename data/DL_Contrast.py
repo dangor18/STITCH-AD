@@ -35,7 +35,7 @@ class train_dataset(Dataset):
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        self.random_erasing = transforms.RandomErasing(p=0.05, scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, inplace=False)
+        self.random_erasing = transforms.RandomErasing(p=0.25, scale=(0.5, 0.8), ratio=(0.3, 3.3), value=0, inplace=False)
         
         # construct metas
         with open(meta_file, "r") as f_r:
@@ -57,9 +57,6 @@ class train_dataset(Dataset):
         plt.tight_layout()
         plt.show()
 
-    def overlay_blend(self, base, top):
-        return np.where(base > 0.5, 1 - 2*(1-base)*(1-top), 2*base*top)
-
     def get_noise(self):
         # add simplex noise to create pseudo abnormal sample
         size = 256
@@ -72,7 +69,7 @@ class train_dataset(Dataset):
         
         # Normalize simplex noise to range [0, 1]
         simplex_noise = (simplex_noise - simplex_noise.min()) / (simplex_noise.max() - simplex_noise.min()) * 0.5
-        simplex_noise = (simplex_noise - simplex_noise.mean()) / simplex_noise.std()
+        #simplex_noise = (simplex_noise - simplex_noise.mean()) / simplex_noise.std()
         
         # Initialize with 0.5 (neutral gray) instead of 0
         init_noise = np.zeros((256, 256, 3))
@@ -105,7 +102,9 @@ class train_dataset(Dataset):
         else:
             dem = image[:, :, 0]
             grey = image[:, :, 1]
-            sobel_dem = filters.prewitt(dem)
+            sobel_dem = ndimage.sobel(dem)
+            sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+
             dem_na= dem[:, :, np.newaxis]
             sobel_dem_na = sobel_dem[:, :, np.newaxis]
             grey_na = grey[:, :, np.newaxis]
@@ -113,14 +112,16 @@ class train_dataset(Dataset):
             normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
 
             noise = self.get_noise()
-            dem_noise = noise * np.std(dem)  # change std dev to match that of orchard, as without this the noise affects some orchard patches more than others
-            dem_noise = dem + dem_noise
-            grey_noise = noise * np.std(grey)
-            grey_noise = grey + grey_noise
-            grey_na = grey_noise[:, :, np.newaxis]
-            sobel_noise = filters.prewitt(dem_noise)
-            dem_na = dem_noise[:, :, np.newaxis]
+            dem = dem + noise
+            grey = grey + noise
+            sobel_noise = ndimage.sobel(noise)
+            sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
+            sobel_noise = sobel_dem + sobel_noise
+
+            dem_na = dem[:, :, np.newaxis]
+            grey_na = grey[:, :, np.newaxis]
             sobel_noise = sobel_noise[:, :, np.newaxis]
+
             img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
             img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
             img_noise = self.random_erasing(img_noise)

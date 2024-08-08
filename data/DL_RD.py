@@ -62,59 +62,6 @@ class CustomDataset(Dataset):
 
     def __len__(self):
         return len(self.metas)
-    # TODO: REMOVE THESE IF NOT USED
-    def calculate_ndvi(self, image_array):
-        """
-        Calculate NDVI from a NumPy array with shape (H, W, C) where C=3,
-        and channel 2 is NIR, channel 3 is RED.
-        
-        Args:
-        image_array (numpy.ndarray): Input image array with shape (H, W, 3)
-        
-        Returns:
-        numpy.ndarray: NDVI array with shape (H, W)
-        """
-        # extract NIR and RED spectral channels
-        nir = image_array[:, :, 1].astype(np.float32)
-        red = image_array[:, :, 2].astype(np.float32)
-        
-        numerator = nir - red
-        denominator = nir + red
-        
-        ndvi = np.divide(numerator, denominator, out=np.zeros_like(numerator), where=denominator!=0)
-        ndvi = np.clip(ndvi, 0, 1)
-        return ndvi
-
-    def detect_dem_artifacts(self, image_array, smooth_sigma=1, diff_threshold=0.2):
-        """
-        Detect potential artifacts in DEM by comparing with NDVI.
-        
-        Args:
-        image_array (numpy.ndarray): Input image array with shape (H, W, C)
-        dem_index (int): Index of DEM channel (default: 0)
-        nir_index (int): Index of NIR channel (default: 1)
-        red_index (int): Index of Red channel (default: 2)
-        smooth_sigma (float): Sigma for Gaussian smoothing (default: 1)
-        diff_threshold (float): Threshold for considering a difference significant (default: 0.2)
-        
-        Returns:
-        numpy.ndarray: Array highlighting potential artifacts
-        """
-        #ndvi = self.calculate_ndvi(image_array)
-        #dem = filters.prewitt(image_array[:, :, 0].astype(np.float32))
-        # Normalize DEM and NDVI to 0-1 range
-        #ndvi_norm = (ndvi - np.min(ndvi)) / (np.max(ndvi) - np.min(ndvi))
-        
-        # Calculate difference
-        #diff = np.abs(dem - ndvi)
-        #diff = np.clip(diff, 0, 1)
-        # Apply Gaussian smoothing to reduce noise
-        #diff_smooth = ndimage.gaussian_filter(diff, sigma=smooth_sigma)
-        #thresh = np.mean(diff_smooth) + diff_threshold * np.std(diff_smooth)
-        # Threshold the difference to highlight potential artifacts
-        #artifacts = np.where(diff_smooth > thresh, 1, 0)
-        #temp = self.threshold_and_xor(dem, ndvi)
-        #return dem
     
     def plot_channels(self, image, title):
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
@@ -143,22 +90,16 @@ class CustomDataset(Dataset):
             self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
         else:
             dem = image[:, :, 0]
+            #print(dem.min(), dem.max())
             #dem = torch.unsqueeze(torch.from_numpy(dem).float(), dim=0)
             rgb = image[:, :, 1]
-            '''h, w, c = rgb.shape
-            rgb_reshaped = rgb.reshape(-1, c)
-            
-            # Apply PCA
-            pca = PCA(n_components=1)
-            grey = pca.fit_transform(rgb_reshaped)
-            
-            # Reshape grey back to 2D and convert to PyTorch tensor
-            grey = grey.reshape(h, w)'''
             grey = rgb
+            #print(grey.min(), grey.max())
             #grey = torch.unsqueeze(torch.from_numpy(grey).float(), dim=0)
             #prewitt_dem = filters.prewitt(dem)
             sobel_dem = ndimage.sobel(dem)
-
+            sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
+            #print(sobel_dem.min(), sobel_dem.max())
             #prewitt_dem = prewitt_dem[:, :, np.newaxis]
             dem = dem[:, :, np.newaxis]
             sobel_dem = sobel_dem[:, :, np.newaxis]

@@ -86,9 +86,10 @@ def get_scores(params, data_loader, device):
     
     for input in data_loader:
         patch = input['image'].to(device)
+        location = (input['x'], input['y'])
         orchard_id = input['clsname'][0]
-        if score_dict.get(orchard_id) is None:  # new orchard
-            score_dict[orchard_id] = []
+
+        score_dict[orchard_id][location] = []
         with torch.no_grad():
             if params["model_type"] == "RD":    # get score from model and add to list
                 inputs = encoder(patch)
@@ -96,7 +97,7 @@ def get_scores(params, data_loader, device):
                 anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
                 anomaly_map = gaussian_filter(anomaly_map, sigma=4)
                 score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id].append(score)
+                score_dict[orchard_id][location].append(score)
             elif params["model_type"] == "RDProj":
                 inputs = encoder(patch)
                 features = proj_layer(inputs)
@@ -104,7 +105,7 @@ def get_scores(params, data_loader, device):
                 anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
                 anomaly_map = gaussian_filter(anomaly_map, sigma=4)
                 score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id].append(score)
+                score_dict[orchard_id][location].append(score)
     
     return score_dict
 
@@ -222,14 +223,23 @@ def infer_dbscan(params, data_loader, device):
     
     dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
 
-    for orchard_id, scores in score_dict.items():
-        dbscan.fit(np.array(scores).reshape(-1, 1))     # fit the model 
-        print(orchard_id + "\n", np.unique(dbscan.labels_, return_counts=True))
+    for orchard_id, locations in score_dict.items():
+        # use input as score and x, y coordinates (3d data)
+        scores = []
+        coords = []
+        for (x, y), score_list in locations.items():
+            for score in score_list:
+                scores.append(score)
+                coords.append([x, y])
+        
+        features = np.column_stack((np.array(scores), np.array(coords)))
+        dbscan.fit(features)     # fit the model 
+        #print(orchard_id + "\n", np.unique(dbscan.labels_, return_counts=True))
         pr_dict[orchard_id] = dbscan.labels_            # get predictions
-        if np.unique(pr_dict[orchard_id], return_counts=True)[1][0] > params["min_score"]:
+        if np.sum(pr_dict[orchard_id] == -1) > params["min_score"] or len(np.unique(pr_dict[orchard_id])) > params["max_clusters"]:
             pr_dict[orchard_id] = -1
         else:
-            pr_dict[orchard_id] = 1
+            pr_dict[orchard_id] = 1 
         
     return pr_dict
 

@@ -48,13 +48,21 @@ class CrossChannelAttention(nn.Module):
         
         self.gamma = nn.Parameter(torch.zeros(1))
         
-        # Add layer normalization
         self.layer_norm = nn.LayerNorm(in_channels)
         
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in [self.query_conv, self.key_conv, self.value_conv]:
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        
+        nn.init.constant_(self.gamma, 0.1)
+
     def forward(self, x):
         batch_size, C, H, W = x.size()
         
-        # Apply layer normalization
         x = x.permute(0, 2, 3, 1).contiguous()
         x = self.layer_norm(x)
         x = x.permute(0, 3, 1, 2).contiguous()
@@ -66,8 +74,6 @@ class CrossChannelAttention(nn.Module):
         value = self.value_conv(x_flat)
         
         energy = torch.bmm(query, key)
-        
-        # Apply softmax with temperature scaling
         attention = nn.functional.softmax(energy / (self.in_channels ** 0.5), dim=-1)
         
         out = torch.bmm(value, attention.permute(0, 2, 1))
@@ -87,9 +93,15 @@ class SELayer(nn.Module):
             nn.Linear(channel // reduction, channel, bias=False),
             nn.Sigmoid()
         )
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in self.fc:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
-        b, c, w, h = x.size()
+        b, c, _, _ = x.size()
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y.expand_as(x)
@@ -105,7 +117,14 @@ class GCModule(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(channel // reduction, channel, kernel_size=1)
         )
+        self._init_weights()
     
+    def _init_weights(self):
+        nn.init.kaiming_normal_(self.conv.weight, mode='fan_out', nonlinearity='relu')
+        for m in self.transform:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+
     def context_modeling(self, x):
         b, c, h, w = x.shape
         input_x = x
@@ -115,11 +134,22 @@ class GCModule(nn.Module):
         out = torch.matmul(input_x, context)
         out = out.reshape(b, c, 1, 1)
         return out
-    
+
     def forward(self, x):
         context = self.context_modeling(x)
         y = self.transform(context)
         return x + y
+
+class CBAM(nn.Module):
+    def __init__(self, channel, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channel, reduction)
+        self.sa = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        x = self.ca(x)
+        x = self.sa(x)
+        return x
 
 class ChannelAttention(nn.Module):
     def __init__(self, channel, reduction=16):
@@ -132,6 +162,12 @@ class ChannelAttention(nn.Module):
             nn.Conv2d(channel // reduction, channel, 1, bias=False)
         )
         self.sigmoid = nn.Sigmoid()
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in self.fc:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
         avg_out = self.fc(self.avg_pool(x))
@@ -144,24 +180,17 @@ class SpatialAttention(nn.Module):
         super(SpatialAttention, self).__init__()
         self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
         self.sigmoid = nn.Sigmoid()
+        self._init_weights()
+    
+    def _init_weights(self):
+        nn.init.kaiming_normal_(self.conv.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
         avg_out = torch.mean(x, dim=1, keepdim=True)
         max_out, _ = torch.max(x, dim=1, keepdim=True)
-        out = torch.concat([avg_out, max_out], dim=1)
+        out = torch.cat([avg_out, max_out], dim=1)
         out = self.conv(out)
-        return x * self.sigmoid(out) 
-    
-class CBAM(nn.Module):
-    def __init__(self, channel, reduction=16, kernel_size=7):
-        super().__init__()
-        self.ca = ChannelAttention(channel, reduction)
-        self.sa = SpatialAttention(kernel_size)
-    
-    def forward(self, x):
-        x = self.ca(x)
-        x = self.sa(x)
-        return x
+        return x * self.sigmoid(out)
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -528,8 +557,6 @@ class AttnBottleneck(nn.Module):
             self.attention_block = SELayer(inplanes)
         self.downsample = downsample
         self.stride = stride
-        # Add gradient clipping
-        self.clip_value = 1.0
 
     def forward(self, x: Tensor) -> Tensor:
         if self.attention is not False:
