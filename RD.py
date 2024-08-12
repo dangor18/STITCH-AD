@@ -112,7 +112,6 @@ def train_tuning(params, trial):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_loader, test_loader = get_loaders(params)
     
-    #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
     encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
     encoder = encoder.to(device)
     bn = bn.to(device)
@@ -125,7 +124,7 @@ def train_tuning(params, trial):
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
-        step_size=30,
+        step_size=params.get("step", 10),
         gamma=params["lr_factor"],
     )
 
@@ -152,7 +151,7 @@ def train_tuning(params, trial):
             scaler.update()
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 2 == 0:
+        if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
             total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=params["loss_weights"])
             
             if total_auroc > best_auroc:
@@ -171,7 +170,6 @@ def train_normal(params, train_loader, test_loader, device):
     """
     Train the model (without hyperparameter) tuning on orchard patch data with the specified parameters and return the best overall AUROC score
     """
-    #pre_conv = ChannelReductionCBAM(in_channels=params["channels"], ratio=2, emphasis_channel=0, weight=params["dem_weight"])
     encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
     encoder = encoder.to(device)
     bn = bn.to(device)
@@ -182,7 +180,7 @@ def train_normal(params, train_loader, test_loader, device):
     # lr scheduler
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, 
-        step_size=10,
+        step_size=params.get("step", 10),
         gamma=params["lr_factor"],
     )
 
@@ -225,7 +223,7 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 2 == 0:
+        if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
             total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=params["loss_weights"],
                                                          score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"))
             
@@ -248,13 +246,10 @@ def train_normal(params, train_loader, test_loader, device):
 
 def get_loaders(params):
     transform_fn = transforms.Compose([
-                transforms.RandomHorizontalFlip(p=params["flip"]),
-                transforms.RandomVerticalFlip(p=params["flip"]),
+                #transforms.RandomHorizontalFlip(p=params["flip"]),
+                #transforms.RandomVerticalFlip(p=params["flip"]),
                 #transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
                 #transforms.ColorJitter(contrast=(0.9, 1.1)),
-                #transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),
-                #transforms.RandomErasing(p=params["erasing"], scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0),
-                #transforms.ElasticTransform(),
                 #transforms.RandomRotation(degrees=params["degrees"]),
     ])  
     train_data = CustomDataset(
@@ -300,18 +295,19 @@ def objective(trial):
     with open(config, "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
-    #params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
-    params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.5)
-    #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 24, 32])
+    params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    #params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.5)
+    params["step"] = trial.suggest_int("step", low=1, high=10)
+    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
     params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE"])
     params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
     params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
-    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.3)
-    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.3)
-    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.3)
+    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
+    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
+    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
     params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
 
     #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])

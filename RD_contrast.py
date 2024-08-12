@@ -36,7 +36,7 @@ def get_loaders(params):
         train_data, 
         batch_size=params["batch_size"], 
         shuffle=True,
-        num_workers=1,
+        num_workers=4,
         pin_memory=True,
         persistent_workers=True,
     )
@@ -62,7 +62,7 @@ def train_tuning(params, trial):
     decoder = decoder.to(device)
     
     proj_layer =  MultiProjectionLayer(base=64).to(device)
-    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1))
+    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))
     optimizer_proj = torch.optim.Adam(list(proj_layer.parameters()), lr=params.get("proj_lr", 0.001), betas=(params.get("beta1_proj", 0.5),params.get("beta2_proj", 0.999)))
     optimizer_distill = torch.optim.Adam(list(decoder.parameters())+list(bn.parameters()), lr=params.get("distill_lr", 0.005), betas=(params.get("beta1_distill", 0.5),params.get("beta2_distill", 0.999)))
 
@@ -137,7 +137,7 @@ def train(params, train_loader, test_loader, device):
     decoder = decoder.to(device)
     
     proj_layer =  MultiProjectionLayer(base=64).to(device)
-    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1))
+    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))
     optimizer_proj = torch.optim.Adam(list(proj_layer.parameters()), lr=params.get("proj_lr", 0.001), betas=(params.get("beta1_proj", 0.5),params.get("beta2_proj", 0.999)))
     optimizer_distill = torch.optim.Adam(list(decoder.parameters())+list(bn.parameters()), lr=params.get("distill_lr", 0.005), betas=(params.get("beta1_distill", 0.5),params.get("beta2_distill", 0.999)))
 
@@ -255,6 +255,7 @@ def objective(trial):
     # weight for proj loss in total loss
     params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
     # weight for these losses in proj loss
+    params["ssot_weight"] = trial.suggest_float("ssot_weight", low=0.0, high=1.0)
     params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
     params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
 

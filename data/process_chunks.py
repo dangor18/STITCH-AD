@@ -65,14 +65,14 @@ def scale_file(args: Tuple[str, np.ndarray, np.ndarray, str]):
     """Scale a single file based on its min and max values."""
     input_file, min_vals, max_vals, output_file = args
     denominator = max_vals - min_vals
-    for i in range(len(min_vals)):
-        if min_vals[i] == max_vals[i]:
-            denominator[i] = 1
+    #for i in range(len(min_vals)):
+        #if min_vals[i] == max_vals[i]:
+            #denominator[i] = 1
     
     data = np.load(input_file)
-    scaled_data = (data - min_vals) / denominator
-    scaled_data = np.clip(scaled_data, 0, 1)
-    np.save(output_file, scaled_data)
+    #scaled_data = (data - min_vals) / denominator
+    #scaled_data = np.clip(scaled_data, 0, 1)
+    np.save(output_file, data)
 
 def process_orchard(orchard_path: str, output_path: str):
     """Process a single orchard: calculate percentiles and scale data."""
@@ -85,8 +85,8 @@ def process_orchard(orchard_path: str, output_path: str):
     with concurrent.futures.ProcessPoolExecutor() as executor:
         results = list(executor.map(calculate_percentiles, file_list))
     
-    #min_vals = np.min([r[0] for r in results], axis=0)
-    #max_vals = np.max([r[1] for r in results], axis=0)
+    min_vals = np.min([r[0] for r in results], axis=0)
+    max_vals = np.max([r[1] for r in results], axis=0)
     
     # Scale data
     os.makedirs(output_path, exist_ok=True)
@@ -96,10 +96,10 @@ def process_orchard(orchard_path: str, output_path: str):
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        #executor.map(scale_file, zip(file_list, [min_vals]*len(file_list), 
-                                     #[max_vals]*len(file_list), output_file_list))
-        executor.map(scale_file, zip(file_list, [r[0] for r in results], 
-                                     [r[1] for r in results], output_file_list))
+        executor.map(scale_file, zip(file_list, [min_vals]*len(file_list), 
+                                     [max_vals]*len(file_list), output_file_list))
+        #executor.map(scale_file, zip(file_list, [r[0] for r in results], 
+                                     #[r[1] for r in results], output_file_list))
 
 def calculate_mean_std(orchard_path: str) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate mean and standard deviation for an orchard."""

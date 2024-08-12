@@ -36,53 +36,6 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1, bias = False) -> n
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=bias)
 
-class CrossChannelAttention(nn.Module):
-    def __init__(self, in_channels, reduction_ratio=8):
-        super(CrossChannelAttention, self).__init__()
-        self.in_channels = in_channels
-        self.reduction_ratio = reduction_ratio
-        
-        self.query_conv = nn.Conv1d(in_channels, in_channels // reduction_ratio, 1)
-        self.key_conv = nn.Conv1d(in_channels, in_channels // reduction_ratio, 1)
-        self.value_conv = nn.Conv1d(in_channels, in_channels, 1)
-        
-        self.gamma = nn.Parameter(torch.zeros(1))
-        
-        self.layer_norm = nn.LayerNorm(in_channels)
-        
-        self._init_weights()
-    
-    def _init_weights(self):
-        for m in [self.query_conv, self.key_conv, self.value_conv]:
-            nn.init.xavier_uniform_(m.weight)
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-        
-        nn.init.constant_(self.gamma, 0.1)
-
-    def forward(self, x):
-        batch_size, C, H, W = x.size()
-        
-        x = x.permute(0, 2, 3, 1).contiguous()
-        x = self.layer_norm(x)
-        x = x.permute(0, 3, 1, 2).contiguous()
-        
-        x_flat = x.view(batch_size, C, -1)
-        
-        query = self.query_conv(x_flat).permute(0, 2, 1)
-        key = self.key_conv(x_flat)
-        value = self.value_conv(x_flat)
-        
-        energy = torch.bmm(query, key)
-        attention = nn.functional.softmax(energy / (self.in_channels ** 0.5), dim=-1)
-        
-        out = torch.bmm(value, attention.permute(0, 2, 1))
-        out = out.view(batch_size, C, H, W)
-        
-        out = self.gamma * out + x
-        
-        return out
-
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=16):
         super(SELayer, self).__init__()
@@ -93,63 +46,12 @@ class SELayer(nn.Module):
             nn.Linear(channel // reduction, channel, bias=False),
             nn.Sigmoid()
         )
-        self._init_weights()
-    
-    def _init_weights(self):
-        for m in self.fc:
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
-        b, c, _, _ = x.size()
+        b, c, w, h = x.size()
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y.expand_as(x)
-
-class GCModule(nn.Module):
-    def __init__(self, channel, reduction=16):
-        super().__init__()
-        self.conv = nn.Conv2d(channel, 1, kernel_size=1)
-        self.softmax = nn.Softmax(dim=2)
-        self.transform = nn.Sequential(
-            nn.Conv2d(channel, channel // reduction, kernel_size=1),
-            nn.LayerNorm([channel // reduction, 1, 1]),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channel // reduction, channel, kernel_size=1)
-        )
-        self._init_weights()
-    
-    def _init_weights(self):
-        nn.init.kaiming_normal_(self.conv.weight, mode='fan_out', nonlinearity='relu')
-        for m in self.transform:
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-
-    def context_modeling(self, x):
-        b, c, h, w = x.shape
-        input_x = x
-        input_x = input_x.reshape(b, c, h * w)
-        context = self.conv(x)
-        context = context.reshape(b, 1, h * w).transpose(1, 2)
-        out = torch.matmul(input_x, context)
-        out = out.reshape(b, c, 1, 1)
-        return out
-
-    def forward(self, x):
-        context = self.context_modeling(x)
-        y = self.transform(context)
-        return x + y
-
-class CBAM(nn.Module):
-    def __init__(self, channel, reduction=16, kernel_size=7):
-        super().__init__()
-        self.ca = ChannelAttention(channel, reduction)
-        self.sa = SpatialAttention(kernel_size)
-
-    def forward(self, x):
-        x = self.ca(x)
-        x = self.sa(x)
-        return x
 
 class ChannelAttention(nn.Module):
     def __init__(self, channel, reduction=16):
@@ -162,12 +64,6 @@ class ChannelAttention(nn.Module):
             nn.Conv2d(channel // reduction, channel, 1, bias=False)
         )
         self.sigmoid = nn.Sigmoid()
-        self._init_weights()
-    
-    def _init_weights(self):
-        for m in self.fc:
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
         avg_out = self.fc(self.avg_pool(x))
@@ -180,17 +76,24 @@ class SpatialAttention(nn.Module):
         super(SpatialAttention, self).__init__()
         self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2, bias=False)
         self.sigmoid = nn.Sigmoid()
-        self._init_weights()
-    
-    def _init_weights(self):
-        nn.init.kaiming_normal_(self.conv.weight, mode='fan_out', nonlinearity='relu')
 
     def forward(self, x):
         avg_out = torch.mean(x, dim=1, keepdim=True)
         max_out, _ = torch.max(x, dim=1, keepdim=True)
-        out = torch.cat([avg_out, max_out], dim=1)
+        out = torch.concat([avg_out, max_out], dim=1)
         out = self.conv(out)
-        return x * self.sigmoid(out)
+        return x * self.sigmoid(out) 
+    
+class CBAM(nn.Module):
+    def __init__(self, channel, reduction=16, kernel_size=7):
+        super().__init__()
+        self.ca = ChannelAttention(channel, reduction)
+        self.sa = SpatialAttention(kernel_size)
+    
+    def forward(self, x):
+        x = self.ca(x)
+        x = self.sa(x)
+        return x
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -221,7 +124,7 @@ class BasicBlock(nn.Module):
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
         self.stride = stride
-        self.dropout = nn.Dropout(p=0.0)
+        #self.dropout = nn.Dropout(p=0.0)
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
@@ -229,11 +132,11 @@ class BasicBlock(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
-        out = self.dropout(out)
+        #out = self.dropout(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
-        out = self.dropout(out)
+        #out = self.dropout(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -548,13 +451,9 @@ class AttnBottleneck(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         # attention blocks
         if self.attention == "CBAM":
-            self.attention_block = CBAM(inplanes)
-        elif self.attention == "GC":
-            self.attention_block = GCModule(inplanes)
-        elif self.attention == "CROSS":
-            self.attention_block = CrossChannelAttention(inplanes)
+            self.attention_block = CBAM(inplanes, reduction=16)
         elif self.attention == "SE":
-            self.attention_block = SELayer(inplanes)
+            self.attention_block = SELayer(inplanes, reduction=16)
         self.downsample = downsample
         self.stride = stride
 

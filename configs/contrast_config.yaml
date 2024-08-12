@@ -1,5 +1,5 @@
-data_path: data/chunks/DRGB_80v2/
-meta_path: data/chunks/DRGB_80v2/metadata/
+data_path: data/chunks/DRGB_80_RAW/
+meta_path: data/chunks/DRGB_80_RAW/metadata/
 log_path: logs/proj.txt
 resize_x: 256
 resize_y: 256
@@ -7,22 +7,23 @@ channels: 3
 
 model_path: checkpoints/RD_proj.pth
 architecture: "wide_resnet50_2"
-bn_attention: CBAM
+bn_attention: False
 
-loss_weights: [0.82, 0.92, 1.44]
-score_weight: 0.2
+loss_weights: [1.0, 1.0, 1.0]
+score_weight: 0.0
 
 proj_loss_weight: 0.2
+ssot_weight: 1.0
 contrast_weight: 0.1
-reconstruct_weight: 0.01
+reconstruct_weight: 0.1
 
-num_epochs: 100
-batch_size: 16
+num_epochs: 25
+batch_size: 32
 proj_lr: 0.001
 distill_lr: 0.005
-proj_lr_factor: 0.333
-distill_lr_factor: 0.333
-beta1_proj: 0.98
+proj_lr_factor: 0.25
+distill_lr_factor: 0.25
+beta1_proj: 0.5
 beta2_proj: 0.999
-beta1_distill: 0.98
+beta1_distill: 0.5
 beta2_distill: 0.999

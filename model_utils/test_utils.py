@@ -127,12 +127,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
         sum(orchard_data["pr_case3"]) / orchard_case_count[orchard_id]["case_3"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
             orchard_data["pr_case3"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case3"]]
-        '''
-        if (orchard_case_count[orchard_id]["case_2"] != 0 and 
-        sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 
-        < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
-            orchard_data["pr_case2"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case2"]]
-        '''
+
         orchard_anomaly_scores[orchard_id]["case_2"][0] = round(sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"], 5) if not len(orchard_data["pr_case2"]) == 0 else None
         orchard_anomaly_scores[orchard_id]["case_2"][1] = round(np.std(orchard_data["pr_case2"]), 5) if not len(orchard_data["pr_case2"]) == 0 else None
         orchard_anomaly_scores[orchard_id]["case_1"][0] = round(sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"], 5) if not len(orchard_data["pr_case1"]) == 0 else None

@@ -75,7 +75,7 @@ class Revisit_RDLoss(nn.Module):
     receive multiple inputs feature
     return multi-task loss:  SSOT loss, Reconstruct Loss, Contrast Loss
     """
-    def __init__(self, reconstruct_weight, contrast_weight, consistent_shuffle = True):
+    def __init__(self, reconstruct_weight, contrast_weight, ssot_weight, consistent_shuffle = True):
         super(Revisit_RDLoss, self).__init__()
         self.sinkhorn = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=0.05, \
                               reach=None, diameter=10000000, scaling=0.95, \
@@ -83,6 +83,7 @@ class Revisit_RDLoss(nn.Module):
                                   debias=True, potentials=False, verbose=False, backend='auto')
         self.reconstruct = CosineReconstruct()       
         self.contrast = torch.nn.CosineEmbeddingLoss(margin = 0.5)
+        self.ssot_weight = ssot_weight
         self.reconstruct_weight = reconstruct_weight
         self.contrast_weight = contrast_weight
 
@@ -117,4 +118,4 @@ class Revisit_RDLoss(nn.Module):
         loss_contrast = self.contrast(noised_feature1.view(noised_feature1.shape[0], -1), normal_proj1.view(normal_proj1.shape[0], -1), target = target) +\
                            self.contrast(noised_feature2.view(noised_feature2.shape[0], -1), normal_proj2.view(normal_proj2.shape[0], -1), target = target) +\
                            self.contrast(noised_feature3.view(noised_feature3.shape[0], -1), normal_proj3.view(normal_proj3.shape[0], -1), target = target)
-        return (loss_ssot + self.reconstruct_weight * loss_reconstruct + self.contrast_weight * loss_contrast)/1.11
+        return (self.ssot_weight * loss_ssot + self.reconstruct_weight * loss_reconstruct + self.contrast_weight * loss_contrast)/1.11
