@@ -161,7 +161,7 @@ def train_tuning(params, trial):
             with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
+                loss = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -172,7 +172,7 @@ def train_tuning(params, trial):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=params["loss_weights"])
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=params["feature_weights"])
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -209,7 +209,7 @@ def train_normal(params, train_loader, test_loader, device):
     best_auroc = 0
     auroc_dict = {}
     print("[INFO] TRAINING MODEL...")
-
+    
     # train loop    
     for epoch in range(params["num_epochs"]):
         bn.train()
@@ -224,7 +224,7 @@ def train_normal(params, train_loader, test_loader, device):
             with autocast(device_type="cuda"):
                 inputs = encoder(images)
                 outputs = decoder(bn(inputs))
-                loss = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
+                loss = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
             #loss.backward()
@@ -244,8 +244,8 @@ def train_normal(params, train_loader, test_loader, device):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=params["loss_weights"],
-                                                         score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"))
+            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=params["feature_weights"],
+                                                         score_weight=params.get("score_weight", 0.0))
             
             # collect aurocs for each orchard and total for plotting
             auroc_dict[epoch+1] = orchard_auroc_dict
@@ -260,7 +260,7 @@ def train_normal(params, train_loader, test_loader, device):
             
             scheduler.step()
     
-    test(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), n_plot_per_class=5)
+    test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
     plot_auroc(auroc_dict)
     return best_auroc
 
@@ -295,12 +295,10 @@ def objective(trial):
     params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
     params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
-    params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
-    params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
-    params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
-    params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
-
-    #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
+    params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
+    params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
+    params["feature_weight3"] = trial.suggest_float("feature_weight3", low=0.5, high=1.5)
+    params["feature_weights"] = [params["feature_weight1"], params["feature_weight2"], params["feature_weight3"]]
     params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
 
     return train_tuning(params, trial)

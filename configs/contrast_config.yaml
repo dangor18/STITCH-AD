@@ -5,7 +5,7 @@ resize_x: 256
 resize_y: 256
 channels: 3
 
-model_path: checkpoints/RD_proj.pth
+model_path: checkpoints/RD4SAD-97.65.pth
 architecture: "wide_resnet50_2"
 bn_attention: False
 

@@ -13,7 +13,7 @@ architecture: "wide_resnet50_2"
 bn_attention: SE
 optimizer: adam
 
-loss_weights: [1.0, 1.0, 1.0]
+feature_weights: [1.0, 1.0, 1.0]
 score_weight: 0
 
 num_epochs: 20

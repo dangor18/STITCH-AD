@@ -21,9 +21,9 @@ def plot_sample(image, label, anomaly_score, orchard_id):
     plt.tight_layout()
     plt.show()
 
-def plot_histogram(case_1_scores, case_2_scores, normal_scores, orchard_id):
+def plot_histogram(case_1_scores, case_2_scores, case_3_scores, normal_scores, orchard_id):
     plt.figure(figsize=(12, 6))
-    combined_scores = np.concatenate([normal_scores] + ([case_1_scores] if len(case_1_scores) > 0 else []) + ([case_2_scores] if len(case_2_scores) > 0 else []))
+    combined_scores = np.concatenate([normal_scores] + ([case_1_scores] if len(case_1_scores) > 0 else []) + ([case_2_scores] if len(case_2_scores) > 0 else [])  + ([case_3_scores] if len(case_3_scores) > 0 else []))
     
     min = np.min(combined_scores)
     max = np.max(combined_scores)
@@ -34,6 +34,8 @@ def plot_histogram(case_1_scores, case_2_scores, normal_scores, orchard_id):
         plt.hist(case_1_scores, bins=bins, alpha=0.7, label='Case 1', color='red')
     if len(case_2_scores) > 0:
         plt.hist(case_2_scores, bins=bins, alpha=0.7, label='Case 2', color='blue')
+    if len(case_3_scores) > 0:
+        plt.hist(case_3_scores, bins=bins, alpha=0.7, label='Case 3', color='orange')
 
     plt.xlabel('Anomaly Score')
     plt.ylabel('Frequency')
@@ -46,6 +48,8 @@ def plot_histogram(case_1_scores, case_2_scores, normal_scores, orchard_id):
         plt.axvline(np.mean(case_1_scores), color='red', linestyle='dashed', linewidth=2)
     if len(case_2_scores) > 0:
         plt.axvline(np.mean(case_2_scores), color='blue', linestyle='dashed', linewidth=2)
+    if len(case_3_scores) > 0:
+        plt.axvline(np.mean(case_3_scores), color='orange', linestyle='dashed', linewidth=2)
 
     plt.tight_layout()
     plt.show()

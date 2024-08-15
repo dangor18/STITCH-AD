@@ -14,8 +14,9 @@ import yaml
 from torch.amp import autocast, GradScaler
 from model.resnet import resnet18, resnet34, resnet50, wide_resnet50_2
 from model.de_resnet import de_resnet18, de_resnet34, de_wide_resnet50_2, de_resnet50
-from model_utils.test_utils import evaluation_multi_proj
+from model_utils.test_utils import evaluation_multi_proj, test_multi_proj
 from model_utils.train_utils import MultiProjectionLayer, Revisit_RDLoss, loss_function
+from model_utils.plots import plot_auroc
 from data.DL_Contrast import test_dataset, train_dataset
 
 def setup_seed(seed):
@@ -101,7 +102,7 @@ def train_tuning(params, trial):
             L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
 
             outputs = decoder(bn(feature_space))
-            L_distill = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
+            L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
             loss.backward()
             if (i + 1) % accumulation_steps == 0:
@@ -158,7 +159,7 @@ def train(params, train_loader, test_loader, device):
     
     auroc_dict = {}
     num_epoch = params.get("num_epochs", 100)
-
+    
     print("[INFO] TRAINING MODEL...")
     for epoch in range(1,num_epoch+1):
         bn.train()
@@ -182,7 +183,7 @@ def train(params, train_loader, test_loader, device):
             L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
 
             outputs = decoder(bn(feature_space))
-            L_distill = loss_function(inputs, outputs, params.get("loss_weights", [1.0, 1.0, 1.0]))
+            L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
             loss.backward()
             if (i + 1) % accumulation_steps == 0:
@@ -218,6 +219,10 @@ def train(params, train_loader, test_loader, device):
         distill_scheduler.step()
         proj_scheduler.step()
     
+    # test best model after training and plot results
+    test_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+    plot_auroc(auroc_dict)
     return best_auroc, best_epoch
 
 def write_to_file(study, trial):
@@ -254,11 +259,11 @@ def objective(trial):
     #params["beta2_distill"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
     # distill loss weights (3 levels)
-    #params["loss_weight1"] = trial.suggest_float("loss_weight1", low=0.5, high=1.5)
-    #params["loss_weight2"] = trial.suggest_float("loss_weight2", low=0.5, high=1.5)
-    #params["loss_weight3"] = trial.suggest_float("loss_weight3", low=0.5, high=1.5)
-    #params["loss_weights"] = [params["loss_weight1"], params["loss_weight2"], params["loss_weight3"]]
-    #params["loss_weight_score"] = trial.suggest_categorical("loss_weight_score", [True, False])
+    #params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
+    #params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
+    #params["feature_weight3"] = trial.suggest_float("feature_weight3", low=0.5, high=1.5)
+    #params["feature_weights"] = [params["feature_weight1"], params["feature_weight2"], params["feature_weight3"]]
+    #params["feature_weight_score"] = trial.suggest_categorical("feature_weight_score", [True, False])
     # score weight (max and avg of anomaly map)
     #params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
     # weight for proj loss in total loss

@@ -11,6 +11,7 @@ from statistics import mean
 from scipy.ndimage import gaussian_filter
 import pickle
 from model_utils.plots import plot_sample, plot_histogram
+import matplotlib.pyplot as plt
 from sklearn.metrics import PrecisionRecallDisplay
 
 def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul', weights=[1.0, 1.0, 1.0]):
@@ -55,7 +56,7 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, score_mode='a', temp=[1.0, 1.0, 1.0]):
+def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, temp=[1.0, 1.0, 1.0]):
     """
     Evaluate the model for multiple anomaly types
     """
@@ -85,7 +86,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode, weights=temp)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=temp)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
@@ -168,12 +169,12 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
     
     return average_auroc, orchard_auroc_dict
 
-def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_per_class=5, score_mode='a'):
+def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1.0, feature_weights = [1.0, 1.0, 1.0], n_plot_per_class=0):
     """
         Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     # load the best model after training
-    ckp = torch.load("checkpoints/RD.pth")
+    ckp = torch.load(model_path, weights_only=True)
     for k, v in list(ckp['bn'].items()):
         if 'memory' in k:
             ckp['bn'].pop(k)
@@ -206,7 +207,7 @@ def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_p
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
@@ -265,23 +266,25 @@ def test(encoder, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_p
                                       #orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
         auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
         print("[INFO] FINAL RESULTS:")
-        print(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
-        plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_normal"], orchard_id)
+        print(f"- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
+        plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_case3"], orchard_data["pr_normal"], orchard_id)
 
+        fig, ax = plt.subplots()
         if auroc_case1:
             PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case1"], name="CASE 1 PRECISION RECALL").plot()
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case1"], name="CASE 1 PRECISION RECALL", ax=ax)
         if auroc_case2:
             PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case2"], name="CASE 2 PRECISION RECALL").plot()
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case2"], name="CASE 2 PRECISION RECALL", ax=ax)
         if auroc_case3:
             PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case3"], name="CASE 3 PRECISION RECALL").plot()
-                
-        for i in range(len(orchard_patch_results[orchard_id]["img"])):
-            plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case3"], name="CASE 3 PRECISION RECALL", ax=ax)
+        plt.show()
+        if n_plot_per_class > 0:        
+            for i in range(len(orchard_patch_results[orchard_id]["img"])):
+                plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
 
-def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, score_mode='a', temp=[1.0, 1.0, 1.0]):
+def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
         Evaluate the model for multiple anomaly types
     """
@@ -312,7 +315,7 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
             inputs = encoder(img)
             features = proj(inputs)
             outputs = decoder(bn(features))
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a')
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map) + score_weight *  np.average(anomaly_map)
@@ -400,26 +403,28 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
     
     return average_auroc, orchard_auroc_dict
 
-def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weight = 1.0, n_plot_per_class=5, score_mode='a'):
+def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path, score_weight = 1.0, feature_weights = [1.0, 1.0, 1.0], n_plot_per_class=0):
     """
         Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     # load the best model after training
-    ckp = torch.load("checkpoints/RDProj.pth")
+    ckp = torch.load(model_path, weights_only=True)
     for k, v in list(ckp['bn'].items()):
         if 'memory' in k:
             ckp['bn'].pop(k)
     decoder.load_state_dict(ckp['decoder'])
+    proj.load_state_dict(ckp['proj'])
     bn.load_state_dict(ckp['bn'])
     
     bn.eval()
+    proj.eval()
     decoder.eval()
    
     # average auroc for each orchard
-    orchard_auroc_results = {}
     orchard_patch_results = {}
     orchard_case_count = {}
     orchard_anomaly_scores = {}
+    orchard_auroc_results = {}
     plot_count = {}
 
     with torch.no_grad():
@@ -439,7 +444,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weigh
             features = proj(inputs)
             outputs = decoder(bn(features))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode=score_mode)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
@@ -450,76 +455,65 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, score_weigh
                 orchard_patch_results[orchard_id]["img"].append(img)
                 orchard_patch_results[orchard_id]["label"].append(label)
             
-        if label == 1:  # case_1 anomaly
-            orchard_auroc_results[orchard_id]["pr_case1"].append(anomaly_score)
-            orchard_case_count[orchard_id]["case_1"] += 1
-        elif label == 2:  # case_2 anomaly
-            orchard_auroc_results[orchard_id]["pr_case2"].append(anomaly_score)
-            orchard_case_count[orchard_id]["case_2"] += 1
-        elif label == 3:  # case_3 anomaly
-            orchard_auroc_results[orchard_id]["pr_case3"].append(anomaly_score)
-            orchard_case_count[orchard_id]["case_3"] += 1
-        elif label == 0:  # normal
-            orchard_auroc_results[orchard_id]["pr_normal"].append(anomaly_score)
-            orchard_case_count[orchard_id]["normal"] += 1
+            if label == 1:  # case_1 anomaly
+                orchard_auroc_results[orchard_id]["pr_case1"].append(anomaly_score)
+                orchard_case_count[orchard_id]["case_1"] += 1
+            elif label == 2:  # case_2 anomaly
+                orchard_auroc_results[orchard_id]["pr_case2"].append(anomaly_score)
+                orchard_case_count[orchard_id]["case_2"] += 1
+            elif label == 3:  # case_3 anomaly
+                orchard_auroc_results[orchard_id]["pr_case3"].append(anomaly_score)
+                orchard_case_count[orchard_id]["case_3"] += 1
+            elif label == 0:  # normal
+                orchard_auroc_results[orchard_id]["pr_normal"].append(anomaly_score)
+                orchard_case_count[orchard_id]["normal"] += 1
     
-        for orchard_id, orchard_data in orchard_auroc_results.items():
-            # normalize scores with max anomaly score
-            #for key in ["pr_case1", "pr_case2", "pr_normal"]:
-                #orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
+    for orchard_id, orchard_data in orchard_auroc_results.items():
+        # calc average scores for each case
+        orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
+        orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
+        # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
+        if (orchard_case_count[orchard_id]["case_1"] != 0 and 
+        sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
+        < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
+            orchard_data["pr_case1"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case1"]]
+            for i in range(len(orchard_patch_results[orchard_id]["img"])):
+                if orchard_patch_results[orchard_id]["label"][i] == 1:
+                    orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
+        '''
+        if (orchard_case_count[orchard_id]["case_2"] != 0 and 
+        sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 
+        < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
+            orchard_data["pr_case2"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case2"]]
+            for i in range(len(orchard_patch_results[orchard_id]["img"])):
+                if orchard_patch_results[orchard_id]["label"][i] == 2:
+                    orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
+        '''
+        auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
+                                      orchard_data["pr_normal"] + orchard_data["pr_case1"])
+        auroc_case2 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))], 
+                                      orchard_data["pr_normal"] + orchard_data["pr_case2"])
+        auroc_case3 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
+                                        orchard_data["pr_normal"] + orchard_data["pr_case3"])
+        #auroc_total = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
+                                      #orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
+        auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
+        print("[INFO] FINAL RESULTS:")
+        print(f"- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
+        plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_case3"], orchard_data["pr_normal"], orchard_id)
 
-            # calc average scores for each case
-            orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
-            orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
-            # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
-            if (orchard_case_count[orchard_id]["case_1"] != 0 and 
-            sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
-            < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
-                orchard_data["pr_case1"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case1"]]
-                for i in range(len(orchard_patch_results[orchard_id]["img"])):
-                    if orchard_patch_results[orchard_id]["label"][i] == 1:
-                        orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
-            
-            if (orchard_case_count[orchard_id]["case_3"] != 0 and
-            sum(orchard_data["pr_case3"]) / orchard_case_count[orchard_id]["case_3"]
-            < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
-                orchard_data["pr_case3"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case3"]]
-                for i in range(len(orchard_patch_results[orchard_id]["img"])):
-                    if orchard_patch_results[orchard_id]["label"][i] == 3:
-                        orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
-            '''
-            if (orchard_case_count[orchard_id]["case_2"] != 0 and 
-            sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 
-            < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
-                orchard_data["pr_case2"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case2"]]
-                for i in range(len(orchard_patch_results[orchard_id]["img"])):
-                    if orchard_patch_results[orchard_id]["label"][i] == 2:
-                        orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
-            '''
-            auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
-                                        orchard_data["pr_normal"] + orchard_data["pr_case1"])
-            auroc_case2 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))], 
-                                        orchard_data["pr_normal"] + orchard_data["pr_case2"])
-            auroc_case3 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
-                                            orchard_data["pr_normal"] + orchard_data["pr_case3"])
-            #auroc_total = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
-                                        #orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
-            auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
-            print("[INFO] FINAL RESULTS:")
-            print(f"\n- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
-            # plot histogram
-            plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_normal"], orchard_id)
-            # plot precision recall
-            if auroc_case1:
-                PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case1"], name=f"ORCHARD {orchard_id}: CASE 1 PRECISION RECALL").plot()
-            if auroc_case2:
-                PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case2"], name=f"ORCHARD {orchard_id}: CASE 2 PRECISION RECALL").plot()
-            if auroc_case3:
-                PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
-                                                            orchard_data["pr_normal"] + orchard_data["pr_case3"], name=f"ORCHARD {orchard_id}: CASE 3 PRECISION RECALL").plot()
-                    
+        fig, ax = plt.subplots()
+        if auroc_case1:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case1"], name="CASE 1 PRECISION RECALL", ax=ax)
+        if auroc_case2:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case2"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case2"], name="CASE 2 PRECISION RECALL", ax=ax)
+        if auroc_case3:
+            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case3"]))],
+                                                        orchard_data["pr_normal"] + orchard_data["pr_case3"], name="CASE 3 PRECISION RECALL", ax=ax)
+        plt.show()
+        if n_plot_per_class > 0:        
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
             
