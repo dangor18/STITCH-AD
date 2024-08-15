@@ -1,6 +1,6 @@
 data_path: data/chunks/DRGB_80_RAW/
 meta_path: data/chunks/DRGB_80_RAW/metadata/
-log_path: logs/proj.txt
+log_path: logs/proj_optim_weights.txt
 resize_x: 256
 resize_y: 256
 channels: 3
@@ -12,12 +12,12 @@ bn_attention: False
 loss_weights: [1.0, 1.0, 1.0]
 score_weight: 0.0
 
-proj_loss_weight: 0.2
-ssot_weight: 1.0
-contrast_weight: 0.1
-reconstruct_weight: 0.1
+proj_loss_weight: 0.758175413875071
+ssot_weight: 0.015096731092610782
+contrast_weight: 0.9872387127026788
+reconstruct_weight: 0.6513426603306253
 
-num_epochs: 25
+num_epochs: 30
 batch_size: 32
 proj_lr: 0.001
 distill_lr: 0.005

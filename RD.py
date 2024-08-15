@@ -34,6 +34,45 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
+def get_loaders(params):
+    transform_fn = transforms.Compose([
+                #transforms.RandomHorizontalFlip(p=params["flip"]),
+                #transforms.RandomVerticalFlip(p=params["flip"]),
+                #transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
+                #transforms.ColorJitter(contrast=(0.9, 1.1)),
+                #transforms.RandomRotation(degrees=params["degrees"]),
+    ])  
+    train_data = CustomDataset(
+        params["meta_path"] + "train_metadata.json", 
+        params["data_path"], 
+        transform_fn, 
+        (params["resize_x"], params["resize_y"]), 
+        noise_factor=0,
+        p=params["flip"],
+        norm_choice=params["norm_choice"],
+        channels=params.get("channels", 3)
+    )
+    train_loader = DataLoader(
+        train_data, 
+        batch_size=params["batch_size"], 
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
+    )
+    test_data = CustomDataset(
+        params["meta_path"] + "test_metadata.json",
+        params["data_path"], 
+        None, 
+        (params["resize_x"], params["resize_y"]),
+        norm_choice=params["norm_choice"],
+        channels=params.get("channels", 3)
+    )
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
+    
+    return train_loader, test_loader
+
 def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
     """
     Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
@@ -85,26 +124,7 @@ def get_optimizer(config, model_params = None):
     else:
         print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
         return None
-'''
-def get_loss_fn(params):
-    if params["loss_function"] == "cosine":
-        return lambda a, b: loss_function(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]))
-    elif params["loss_function"] == "concat":
-        return lambda a, b: loss_concat(a, b)
-    elif params["loss_function"] == "margin":
-        return lambda a, b: loss_function_margin(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["margin"])
-    elif params["loss_function"] == "l2":
-        return lambda a, b: loss_function_l2(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["l2_lambda"])
-    elif params["loss_function"] == "noise":
-        return lambda a, b: loss_function_noise(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["noise_factor"])
-    elif params["loss_function"] == "mse":
-        return lambda a, b: loss_function_mse(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["mse_weight"])
-    elif params["loss_function"] == "focal":
-        return lambda a, b: loss_function_focal(a, b, params.get("loss_weights", [1.0, 1.0, 1.0]), params["gamma"], params["alpha"])
-    else:
-        print("[ERROR] UNKNOWN LOSS FUNCTION")
-        return None
-'''
+
 def train_tuning(params, trial):
     """
     Train with hyperparameter tuning (no logs, no model saves, no printing to console)
@@ -244,44 +264,14 @@ def train_normal(params, train_loader, test_loader, device):
     plot_auroc(auroc_dict)
     return best_auroc
 
-def get_loaders(params):
-    transform_fn = transforms.Compose([
-                #transforms.RandomHorizontalFlip(p=params["flip"]),
-                #transforms.RandomVerticalFlip(p=params["flip"]),
-                #transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
-                #transforms.ColorJitter(contrast=(0.9, 1.1)),
-                #transforms.RandomRotation(degrees=params["degrees"]),
-    ])  
-    train_data = CustomDataset(
-        params["meta_path"] + "train_metadata.json", 
-        params["data_path"], 
-        transform_fn, 
-        (params["resize_x"], params["resize_y"]), 
-        noise_factor=0,
-        p=params["flip"],
-        norm_choice=params["norm_choice"],
-        channels=params.get("channels", 3)
-    )
-    train_loader = DataLoader(
-        train_data, 
-        batch_size=params["batch_size"], 
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
-    )
-    test_data = CustomDataset(
-        params["meta_path"] + "test_metadata.json",
-        params["data_path"], 
-        None, 
-        (params["resize_x"], params["resize_y"]),
-        norm_choice=params["norm_choice"],
-        channels=params.get("channels", 3)
-    )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
-    
-    return train_loader, test_loader
+def write_to_file(study, trial):
+    with open("logs/optuna_results.txt", "a") as f:
+        f.write(f"Trial {trial.number}:\n")
+        f.write(f"  Value: {trial.value}\n")
+        f.write("  Params:\n")
+        for key, value in trial.params.items():
+            f.write(f"    {key}: {value}\n")
+        f.write("\n")
 
 # objective function for optuna
 def objective(trial):
@@ -331,7 +321,7 @@ if __name__ == '__main__':
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=150)
+        study.optimize(objective, n_trials=150, callbacks=[write_to_file])
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():

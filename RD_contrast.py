@@ -220,6 +220,15 @@ def train(params, train_loader, test_loader, device):
     
     return best_auroc, best_epoch
 
+def write_to_file(study, trial):
+    with open("logs/optuna_results_proj.txt", "a") as f:
+        f.write(f"Trial {trial.number}:\n")
+        f.write(f"  Value: {trial.value}\n")
+        f.write("  Params:\n")
+        for key, value in trial.params.items():
+            f.write(f"    {key}: {value}\n")
+        f.write("\n")
+
 # objective function for optuna
 def objective(trial):
     parser = ArgumentParser(description="")
@@ -275,7 +284,7 @@ if __name__ == '__main__':
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=100, callbacks=[write_to_file])
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():
