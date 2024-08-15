@@ -27,7 +27,7 @@ class train_dataset(Dataset):
         #self.random_erasing = transforms.RandomErasing(p=0.25, scale=(0.5, 0.8), ratio=(0.3, 3.3), value=0, inplace=False)
         
         # construct metas
-        with open(meta_file, "r") as f_r:
+        with open(self.meta_file, "r") as f_r:
             self.metas = []
             for line in f_r:
                 meta = json.loads(line)
@@ -38,8 +38,8 @@ class train_dataset(Dataset):
     
     def plot_channels(self, image, title):
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title)
-        for i, channel_name in enumerate(['dem', 'edge', 'red']):
+        fig.suptitle(title, size=16)
+        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
             axs[i].set_xlabel('X')
             axs[i].set_ylabel('Y')
             axs[i].set_title(f'{channel_name} Channel')
@@ -179,8 +179,8 @@ class train_dataset(Dataset):
 
         #print(normal_image)
         #print(img_noise)
-        #self.plot_channels(img_noise, "Noisy Image Channels")
-        #self.plot_channels(normal_image, "Original Image Channels")
+        #self.plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
+        #self.plot_channels(normal_image, "Normal Image Channels")
 
         return input
     

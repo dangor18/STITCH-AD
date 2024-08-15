@@ -196,11 +196,11 @@ def create_blocks_upscaling(orchard_id, files, dimensions, upscale_width, upscal
                     case_3_count = np.count_nonzero(mask_block == 3)
                     
                     # check for anomaly cases
-                    if case_1_count >= anomaly_threshold * block_size_x * block_size_y:
+                    if case_1_count > anomaly_threshold * block_size_x * block_size_y:
                         block_file_name = os.path.join(case_1_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    elif case_2_count >= anomaly_threshold * block_size_x * block_size_y:
+                    elif case_2_count > anomaly_threshold * block_size_x * block_size_y:
                         block_file_name = os.path.join(case_2_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    elif case_3_count >= anomaly_threshold * block_size_x * block_size_y:
+                    elif case_3_count > anomaly_threshold * block_size_x * block_size_y:
                         block_file_name = os.path.join(case_3_dir, f"{orchard_id}_block_{i}_{j}.npy")
                     elif case_1_count + case_2_count + case_2_count == 0:
                         block_file_name = os.path.join(normal_dir, f"{orchard_id}_block_{i}_{j}.npy")

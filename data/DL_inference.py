@@ -51,8 +51,8 @@ class inference_dataset(Dataset):
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
 
         # from filename get the x y location of patch (in patch coords)
-        meta["x"] = int(filename.split("/")[-2].split("_")[0])
-        meta["y"] = int(filename.split("/")[-1].split("_")[1])
+        x = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-2])
+        y = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-1])
         label = meta["label"]
         image = np.load(filename)
         if self.resize_dim:
@@ -64,12 +64,16 @@ class inference_dataset(Dataset):
             self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
         else:
             dem = image[:, :, 0]
+            dem_min = np.percentile(dem, 5)
+            dem_max = np.percentile(dem, 95)
+            dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
             #dem = torch.unsqueeze(torch.from_numpy(dem).float(), dim=0)
             rgb = image[:, :, 1]
-            grey = rgb
+            grey = rgb / 255
             #grey = torch.unsqueeze(torch.from_numpy(grey).float(), dim=0)
             #prewitt_dem = filters.prewitt(dem)
             sobel_dem = ndimage.sobel(dem)
+            sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
 
             #prewitt_dem = prewitt_dem[:, :, np.newaxis]
             dem = dem[:, :, np.newaxis]
@@ -83,6 +87,8 @@ class inference_dataset(Dataset):
             {
                 "filename": filename,
                 "label": label,
+                "x": x,
+                "y": y,
             }
         )
         if meta.get("clsname", None):
