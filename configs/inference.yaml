@@ -5,16 +5,16 @@ resize_y: 256
 channels: 3
 
 model_type: RDProj
-model_path: checkpoints/RD_proj.pth
+model_path: checkpoints/RD4SAD-97.65.pth
 architecture: "wide_resnet50_2"
-bn_attention: CBAM
+bn_attention: False
 score_weight: 0
-loss_weights: [1.0, 1.0, 1.0]
+feature_weights: [1.0, 1.0, 1.0]
 
 # classifier params
-method: DBSCAN
+method: ISO_FOREST
 threshold: 3.5        # for z stat
-contamination: 0.1   # for isolation forest
+contamination: 0.05   # for isolation forest
 forest_threshold: 8  # for isolation forest
 eps: 0.1              # for DBSCAN
 min_samples: 10       # for DBSCAN

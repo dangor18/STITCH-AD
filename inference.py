@@ -45,7 +45,7 @@ def load_model(model_type: str, model_path: str, in_channels: int, device):
     bn.eval()
     decoder.eval()
     if model_type == "RD":
-        ckp = torch.load(model_path)
+        ckp = torch.load(model_path, weights_only=True)
         for k, v in list(ckp['bn'].items()):
             if 'memory' in k:
                 ckp['bn'].pop(k)
@@ -57,7 +57,7 @@ def load_model(model_type: str, model_path: str, in_channels: int, device):
     elif model_type == "RDProj":
         proj_layer = MultiProjectionLayer(base=64).to(device)
         proj_layer.eval()
-        ckp = torch.load(model_path)
+        ckp = torch.load(model_path, weights_only=True)
         for k, v in list(ckp['bn'].items()):
             if 'memory' in k:
                 ckp['bn'].pop(k)
@@ -95,7 +95,7 @@ def get_scores(params, data_loader, device):
             if params["model_type"] == "RD":    # get score from model and add to list
                 inputs = encoder(patch)
                 outputs = decoder(bn(inputs))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
+                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
                 anomaly_map = gaussian_filter(anomaly_map, sigma=4)
                 score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
                 score_dict[orchard_id].append(score)
@@ -103,7 +103,7 @@ def get_scores(params, data_loader, device):
                 inputs = encoder(patch)
                 features = proj_layer(inputs)
                 outputs = decoder(bn(features))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
+                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
                 anomaly_map = gaussian_filter(anomaly_map, sigma=4)
                 score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
                 score_dict[orchard_id].append(score)
