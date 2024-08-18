@@ -56,7 +56,7 @@ def cvt2heatmap(gray):
     heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
     return heatmap
 
-def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, temp=[1.0, 1.0, 1.0]):
+def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
     Evaluate the model for multiple anomaly types
     """
@@ -86,7 +86,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
             inputs = encoder(img)
             outputs = decoder(bn(inputs))
 
-            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=temp)
+            anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
             anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
@@ -120,6 +120,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
         # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
+        '''
         if (orchard_case_count[orchard_id]["case_1"] != 0 and 
         sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
@@ -128,7 +129,7 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
         sum(orchard_data["pr_case3"]) / orchard_case_count[orchard_id]["case_3"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
             orchard_data["pr_case3"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case3"]]
-
+        '''
         orchard_anomaly_scores[orchard_id]["case_2"][0] = round(sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"], 5) if not len(orchard_data["pr_case2"]) == 0 else None
         orchard_anomaly_scores[orchard_id]["case_2"][1] = round(np.std(orchard_data["pr_case2"]), 5) if not len(orchard_data["pr_case2"]) == 0 else None
         orchard_anomaly_scores[orchard_id]["case_1"][0] = round(sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"], 5) if not len(orchard_data["pr_case1"]) == 0 else None
@@ -240,6 +241,7 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
         # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
+        '''
         if (orchard_case_count[orchard_id]["case_1"] != 0 and 
         sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
@@ -247,6 +249,7 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 if orchard_patch_results[orchard_id]["label"][i] == 1:
                     orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
+        '''
         '''
         if (orchard_case_count[orchard_id]["case_2"] != 0 and 
         sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 
@@ -349,6 +352,7 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
         # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
+        '''
         if (orchard_case_count[orchard_id]["case_1"] != 0 and 
         sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
@@ -357,7 +361,6 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
         sum(orchard_data["pr_case3"]) / orchard_case_count[orchard_id]["case_3"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
             orchard_data["pr_case3"] = [orchard_anomaly_scores[orchard_id]["normal"][0] - x + orchard_anomaly_scores[orchard_id]["normal"][0] for x in orchard_data["pr_case3"]]
-        '''
         if (orchard_case_count[orchard_id]["case_2"] != 0 and 
         sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
@@ -473,6 +476,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
         # "flip" anomaly scores for case 1 when they are too low (by first getting the difference between the average normal score and then adding the diff. to this) 
+        '''
         if (orchard_case_count[orchard_id]["case_1"] != 0 and 
         sum(orchard_data["pr_case1"]) / orchard_case_count[orchard_id]["case_1"] 
         < sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"]):
@@ -480,6 +484,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 if orchard_patch_results[orchard_id]["label"][i] == 1:
                     orchard_patch_results[orchard_id]["score"][i] = orchard_anomaly_scores[orchard_id]["normal"][0] - orchard_patch_results[orchard_id]["score"][i] + orchard_anomaly_scores[orchard_id]["normal"][0]
+        '''
         '''
         if (orchard_case_count[orchard_id]["case_2"] != 0 and 
         sum(orchard_data["pr_case2"]) / orchard_case_count[orchard_id]["case_2"] 

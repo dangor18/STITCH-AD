@@ -1,6 +1,6 @@
 data_path: data/chunks/DRGB_80_RAW/
 meta_path: data/chunks/DRGB_80_RAW/metadata/
-log_path: logs/raw_noinit_1-99pp.txt
+log_path: logs/test_RD.txt
 resize_x: 256
 resize_y: 256
 channels: 3
@@ -10,13 +10,13 @@ norm_choice: "IMAGE_NET"
 
 model_path: checkpoints/RD.pth
 architecture: "wide_resnet50_2"
-bn_attention: SE
+bn_attention: False
 optimizer: adam
 
 feature_weights: [1.0, 1.0, 1.0]
 score_weight: 0
 
-num_epochs: 20
+num_epochs: 40
 batch_size: 32
 learning_rate: 0.005
 lr_factor: 0.333

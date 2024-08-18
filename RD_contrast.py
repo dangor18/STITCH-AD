@@ -112,11 +112,10 @@ def train_tuning(params, trial):
                 optimizer_proj.zero_grad()
                 optimizer_distill.zero_grad()
         
-        total_auroc, _ = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, score_weight=params.get("score_weight"))      
+        total_auroc, _ = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
         if total_auroc > best_auroc:
             best_auroc = total_auroc
-            best_epoch = epoch
         
         distill_scheduler.step()
         proj_scheduler.step()
@@ -204,7 +203,7 @@ def train(params, train_loader, test_loader, device):
         with open(params["log_path"], "a") as log_file:
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
-        total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"))        
+        total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
         auroc_dict[epoch+1] = orchard_auroc_dict
         print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
@@ -259,19 +258,19 @@ def objective(trial):
     #params["beta2_distill"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
     # distill loss weights (3 levels)
-    #params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
-    #params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
-    #params["feature_weight3"] = trial.suggest_float("feature_weight3", low=0.5, high=1.5)
-    #params["feature_weights"] = [params["feature_weight1"], params["feature_weight2"], params["feature_weight3"]]
+    params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
+    params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
+    params["feature_weight3"] = trial.suggest_float("feature_weight3", low=0.5, high=1.5)
+    params["feature_weights"] = [params["feature_weight1"], params["feature_weight2"], params["feature_weight3"]]
     #params["feature_weight_score"] = trial.suggest_categorical("feature_weight_score", [True, False])
     # score weight (max and avg of anomaly map)
-    #params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
+    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
     # weight for proj loss in total loss
-    params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
+    #params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
     # weight for these losses in proj loss
-    params["ssot_weight"] = trial.suggest_float("ssot_weight", low=0.0, high=1.0)
-    params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
-    params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
+    #params["ssot_weight"] = trial.suggest_float("ssot_weight", low=0.0, high=1.0)
+    #params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
+    #params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
 
     return train_tuning(params, trial)
 

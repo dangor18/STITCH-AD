@@ -8,12 +8,12 @@ from model.de_resnet import de_wide_resnet50_2
 from argparse import ArgumentParser
 import yaml
 from sklearn.ensemble import IsolationForest
-from sklearn.cluster import DBSCAN
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from scipy.stats import zscore
-import random
+from hdbscan import HDBSCAN
+from sklearn.metrics import ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 from data.DL_inference import inference_dataset
+import time
+from sklearn.preprocessing import StandardScaler
 
 gt_dict = {
     "1676": -1,
@@ -28,42 +28,45 @@ gt_dict = {
     "2848": 1,
 }
 
-def load_model(model_type: str, model_path: str, in_channels: int, device):
+def load_model(params, device):
     """
-        Load the necessary model from the checkpoint and return the components
+        Load the specified model from the checkpoint and return the components
         ARGS:
-            model_type: RD or RDProj
-            model_path: path to the model checkpoint
-            in_channels: number of input channels (1 or 3)
+            params: dictionary containing parameters for the model
             device: device to run the model on
     """
-    encoder, bn = wide_resnet50_2(pretrained=True, attention=params["bn_attention"], in_channels=in_channels)
+    encoder, bn = wide_resnet50_2(pretrained=True, attention=params["bn_attention"], in_channels=params["channels"])
     encoder = encoder.to(device)
     bn = bn.to(device)
     decoder = de_wide_resnet50_2(pretrained=False).to(device)
-    encoder.eval()
-    bn.eval()
-    decoder.eval()
-    if model_type == "RD":
-        ckp = torch.load(model_path, weights_only=True)
+    if params["model_type"] == "RD":
+        ckp = torch.load(params["model_path"], weights_only=True)
         for k, v in list(ckp['bn'].items()):
             if 'memory' in k:
                 ckp['bn'].pop(k)
         decoder.load_state_dict(ckp['decoder'])
         bn.load_state_dict(ckp['bn'])
+
+        encoder.eval()
+        bn.eval()
+        decoder.eval()
         
         return encoder, bn, decoder
     
-    elif model_type == "RDProj":
+    elif params["model_type"] == "RDProj":
         proj_layer = MultiProjectionLayer(base=64).to(device)
-        proj_layer.eval()
-        ckp = torch.load(model_path, weights_only=True)
+        ckp = torch.load(params["model_path"], weights_only=True)
         for k, v in list(ckp['bn'].items()):
             if 'memory' in k:
                 ckp['bn'].pop(k)
         decoder.load_state_dict(ckp['decoder'])
         bn.load_state_dict(ckp['bn'])
         proj_layer.load_state_dict(ckp['proj'])
+            
+        encoder.eval()
+        bn.eval()
+        decoder.eval()
+        proj_layer.eval()
 
         return encoder, bn, decoder, proj_layer
     else:
@@ -78,11 +81,14 @@ def get_scores(params, data_loader, device):
             data_loader
             device: device to run the model on
     """
+    start_time = time.time()
+    print("GETTING PATCH DATA...")
     score_dict = {}
+    # get model
     if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
+        encoder, bn, decoder = load_model(params, device)
     else:
-        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["channels"], device)
+        encoder, bn, decoder, proj_layer = load_model(params, device)
     
     for input in data_loader:
         patch = input['image'].to(device)
@@ -95,29 +101,31 @@ def get_scores(params, data_loader, device):
             if params["model_type"] == "RD":    # get score from model and add to list
                 inputs = encoder(patch)
                 outputs = decoder(bn(inputs))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
-                anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-                score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id].append(score)
             elif params["model_type"] == "RDProj":
                 inputs = encoder(patch)
                 features = proj_layer(inputs)
                 outputs = decoder(bn(features))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
-                anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-                score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id].append(score)
-    
+        anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
+        anomaly_map = gaussian_filter(anomaly_map, sigma=4)
+        score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
+        
+        score_dict[orchard_id].append(score)
+
+    end_time = time.time()
+    run_time = end_time - start_time
+    print("TIME (s):", run_time)
     return score_dict
 
 def get_scores_loc(params, data_loader, device):
     """
-        Return anomaly scores for patches for each orchard
+        Return anomaly scores, location, and gt label for patches for each orchard
         ARGS:
             params: dictionary containing parameters for the model
             data_loader
             device: device to run the model on
     """
+    start_time = time.time()
+    print("GETTING PATCH DATA...")
     score_dict = {}
     if params["model_type"] == "RD":
         encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
@@ -126,31 +134,34 @@ def get_scores_loc(params, data_loader, device):
     
     for input in data_loader:
         patch = input['image'].to(device)
-        location = [input['x'], input['y']]
+        x, y = input['x'].item(), input['y'].item() # get x y location for patch from DL
+        lbl = input['label'].item()
+        if lbl in [1, 2, 3]:    # convert gt labels to binary labels
+            lbl = -1
+        elif lbl == 0:
+            lbl = 1
         orchard_id = input['clsname'][0]
         
         if orchard_id not in score_dict:
-            score_dict[orchard_id] = {"scores": [], "locations": []}
+            score_dict[orchard_id] = []
 
         with torch.no_grad():
             if params["model_type"] == "RD":    # get score from model and add to list
                 inputs = encoder(patch)
                 outputs = decoder(bn(inputs))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
-                anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-                score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id]["scores"].append(score)
-                score_dict[orchard_id]["locations"].append(location)
             elif params["model_type"] == "RDProj":
                 inputs = encoder(patch)
                 features = proj_layer(inputs)
                 outputs = decoder(bn(features))
-                anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["loss_weights"])
-                anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-                score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-                score_dict[orchard_id]["scores"].append(score)
-                score_dict[orchard_id]["locations"].append(location)
-    
+        anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
+        anomaly_map = gaussian_filter(anomaly_map, sigma=4)
+        score = np.max(anomaly_map) + params.get("score_weight", 0) * np.average(anomaly_map)
+        
+        score_dict[orchard_id].append([x, y, score, lbl])
+
+    end_time = time.time()
+    run_time = end_time - start_time
+    print("TIME (s):", run_time)
     return score_dict
 
 def get_loaders(params):
@@ -164,19 +175,9 @@ def get_loaders(params):
         (params["resize_x"], params["resize_y"]), 
     )
 
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    data_loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     
     return data_loader
-
-def normalize(patches):
-    '''
-        Normalize patches to lie between -1 and 1
-    '''
-    patches = (patches - np.min(patches)) / (np.max(patches) - np.min(patches))
-    patches = (patches * 2) - 1
-    return patches
-
-def divide_scores(scores, min_size):
     '''
         Divide the scores into patches of size min_size. If the size of the scores is not a multiple of min_size, the last patch will contain random scores from the scores list
     '''
@@ -192,118 +193,162 @@ def divide_scores(scores, min_size):
 
     return patches
 
-def infer_iso_forest(params, data_loader, device):
+def infer_iso_forest(params, score_dict):
     '''
         Perform orchard level inference with isolation forest
         ARGS:
-            model_type: model to be used for inference (RD, RDProj)
-            data_loader
-            device: device to run the model on
+            params: config dictionary
+            score_dict: dictionary containing the scores for each patch for each orchard
     '''
-    score_dict = get_scores(params, data_loader, device)
     pr_dict = {}
-    anomalous_outliers = 0
-    normal_outliers = 0
+    # initialize confusion matrices
+    normal_cm = np.zeros((2, 2))
+    anomalous_cm = np.zeros((2, 2))
     
     # initialize isolation forest
     clf = IsolationForest(contamination=params["contamination"], random_state=42)
-    clf.fit(np.concatenate([scores for scores in score_dict.values()]).reshape(-1, 1))    # fit the isolation forest
-    for orchard_id, scores in score_dict.items():
-        pr_dict[orchard_id] = clf.predict(np.array(scores).reshape(-1, 1))
-        print(orchard_id + "\n", np.unique(pr_dict[orchard_id], return_counts=True))
+    #clf.fit(np.concatenate([scores for scores in score_dict.values()]).reshape(-1, 1))    # fit the isolation forest
+    for orchard_id, data in score_dict.items():
+        scores = np.array([item[2] for item in data])           # get each patches score
+        locations = np.array([item[0:2] for item in data])      # get each patches location
+        gt_labels = np.array([item[3] for item in data])        # get each patches label (used for evaluation only)
+        #print(orchard_id, np.unique(gt_labels, return_counts=True))
+        
+        # combine scores and locations
+        features = np.column_stack((scores, locations))
+        scaler = StandardScaler()
+        features_normalized = scaler.fit_transform(features)
+        clf.fit(features_normalized)
+        predictions = clf.predict(features_normalized)
+        print(orchard_id + "\n", np.unique(predictions, return_counts=True))
+
+        FP = np.sum((predictions == -1) & (gt_labels == 1))     # false positives
+        FN = np.sum((predictions == 1) & (gt_labels == -1))     # false negatives
+        TP = np.sum((predictions == -1) & (gt_labels == -1))    # true positives
+        TN = np.sum((predictions == 1) & (gt_labels == 1))      # true negatives
+
+        if gt_dict[orchard_id] == 1:  # normal orchard
+            normal_cm += np.array([[TN, FP], [FN, TP]])
+        else:  # anomalous orchard
+            anomalous_cm += np.array([[TN, FP], [FN, TP]])
+
         # if the number of anomalies is greater than the threshold, classify as anomalous
-        if np.unique(pr_dict[orchard_id], return_counts=True)[1][0] > params["forest_threshold"]:
-            # if classified as anomalous tally the number of patches for normal and anomalous orchards (used in tuning)
-            if gt_dict[orchard_id] == 1:
-                anomalous_outliers += np.unique(pr_dict[orchard_id], return_counts=True)[1][0]
-            else:
-                normal_outliers += np.unique(pr_dict[orchard_id], return_counts=True)[1][0]
+        if np.unique(predictions, return_counts=True)[1][0] > params["forest_threshold"]:
             pr_dict[orchard_id] = -1
         else:
             pr_dict[orchard_id] = 1
         
-    return pr_dict, anomalous_outliers, normal_outliers
+    return pr_dict, normal_cm, anomalous_cm
 
-def infer_zstat(params, data_loader, device):
-    '''
-        Perform orchard level inference using Z statistics where the threshold is n units of std dev higher or lower than the mean 
-        ARGS:
-            model_type: model to be used for inference (RD, RDProj)
-            data_loader
-            device: device to run the model on
-    '''
-    score_dict = get_scores(params, data_loader, device)
-    pr_dict = {}
-    # tally the outlier patches for anomalous and normal orchards
-    anomalous_outliers = 0
-    normal_outliers = 0
-    
-    for orchard_id, scores in score_dict.items():
-        z_scores = np.abs(zscore(scores))   # z score normalization for all patches in an orchard
-        outliers = z_scores > params["threshold"] + z_scores < -params["threshold"]
-        if np.any(outliers):  # if there are any outliers
-            # if classified as anomalous tally the number of patches for normal and anomalous orchards (used in tuning)
-            if gt_dict[orchard_id] == 1:
-                anomalous_outliers += len(outliers)
-            else:
-                normal_outliers += len(outliers)
-            pr_dict[orchard_id] = -1
-        else:
-            pr_dict[orchard_id] = 1
-    
-    return pr_dict, anomalous_outliers, normal_outliers
-
-def infer_dbscan(params, data_loader, device):
+def infer_dbscan(params, score_dict):
     '''
         Perform orchard level inference using DBSCAN clustering
         ARGS:
-            model_type: model to be used for inference (RD, RDProj)
-            data_loader
-            device: device to run the model on
+            params: config dictionary
+            score_dict: dictionary containing the scores for each patch for each orchard
     '''
-    score_dict = get_scores(params, data_loader, device)
     pr_dict = {}
-    
-    dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
-    for orchard_id, scores in score_dict.items():
-        #dbscan.fit(features)     # fit the model 
-        dbscan.fit(scores.reshape(-1, 1))
-        print(orchard_id + "\n", np.unique(dbscan.labels_, return_counts=True))
-        pr_dict[orchard_id] = dbscan.labels_            # get predictions
-        if np.sum(pr_dict[orchard_id] == -1) > params["min_score"] or len(np.unique(pr_dict[orchard_id])) > params["max_clusters"]:
-            pr_dict[orchard_id] = -1
-        else:
-            pr_dict[orchard_id] = 1 
-        
-    return pr_dict
+    # initialize confusion matrices
+    normal_cm = np.zeros((2, 2))
+    anomalous_cm = np.zeros((2, 2))
 
-def dbscan_scorer(labels):
+    hdbscan = HDBSCAN(min_cluster_size=5, min_samples=5, cluster_selection_epsilon=0.1, alpha=1.0)
+    for orchard_id, data in score_dict.items():
+        scores = np.array([item[2] for item in data])           # get each patches score
+        locations = np.array([item[0:2] for item in data])      # get each patches location
+        gt_labels = np.array([item[3] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
+        #print(orchard_id, np.unique(gt_labels, return_counts=True))
+
+        features = np.column_stack((locations, scores))
+        scaler = StandardScaler()
+        features_normalized = scaler.fit_transform(features)
+        cluster_labels = hdbscan.fit_predict(features_normalized)     # fit the model
+       
+        #print(orchard_id + "\n", np.unique(hdbscan.labels_, return_counts=True))
+        # find the largest cluster (ignore noise / -1)
+        unique_labels, counts = np.unique(cluster_labels[cluster_labels != -1], return_counts=True)
+        if len(unique_labels) == 0:
+            pr_dict[orchard_id] = 1
+            continue
+        else:
+            normal_label = unique_labels[np.argmax(counts)]
+
+            # calculate the mean score (z component) for each cluster and also its size
+            cluster_stats = []
+            normal_mean = np.mean(features_normalized[cluster_labels == normal_label, 2])
+            for label in unique_labels:
+                if label != -1:
+                    cluster_data = features_normalized[cluster_labels == label]
+                    cluster_stats.append([label, np.mean(cluster_data[:, 2]), len(cluster_data)])
+            #print(orchard_id, cluster_stats)
+            
+            # identify whether anomalous clusters exist (those with enough elements and large mean score)
+            anom_clusters = []
+            norm_clusters = [normal_label, -1]
+            pr_dict[orchard_id] = 1
+            for label, mean_z, size in cluster_stats:
+                if label != normal_label:
+                    if (mean_z > normal_mean + params["v_thresh"] and
+                        size >= params["min_cluster_size"]):
+                        pr_dict[orchard_id] = -1
+                        anom_clusters.append(label)
+                    else:
+                        norm_clusters.append(label)
+        #print(orchard_id, anom_clusters, norm_clusters)
+        
+        predictions = np.zeros(cluster_labels.shape)
+        predictions[np.isin(cluster_labels, anom_clusters)] = -1
+        predictions[np.isin(cluster_labels, norm_clusters)] = 1
+
+        FP = np.sum((predictions == -1) & (gt_labels == 1))     # false positives
+        FN = np.sum((predictions == 1) & (gt_labels == -1))     # false negatives
+        TP = np.sum((predictions == -1) & (gt_labels == -1))    # true positives
+        TN = np.sum((predictions == 1) & (gt_labels == 1))      # true negatives
+
+        if gt_dict[orchard_id] == 1:  # normal orchard
+            normal_cm += np.array([[TN, FP], [FN, TP]])
+        else:  # anomalous orchard
+            anomalous_cm += np.array([[TN, FP], [FN, TP]])
+        
+        # plot the clusters
+        fig = plt.figure(figsize=(12, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        
+        scatter = ax.scatter(features_normalized[:, 0], features_normalized[:, 1], features_normalized[:, 2], c=cluster_labels, cmap='set1')
+        fig.colorbar(scatter)
+        
+        ax.set_title(f'3D Adaptive HDBSCAN Clustering for Orchard {orchard_id}')
+        ax.set_xlabel('X Location')
+        ax.set_ylabel('Y Location')
+        ax.set_zlabel('Score')
+        plt.show()
+        
+    return pr_dict, normal_cm, anomalous_cm
+
+def print_results(pr_dict, normal_cm, anomalous_cm):
     """
-        Score the DBSCAN clustering based on the number of clusters, noise points, and cluster sizes
+        Print the results of the inference
+        ARGS:
+            pr_dict: dictionary containing the predictions for each orchard
+            normal_cm: confusion matrix for normal orchards
+            anomalous_cm: confusion matrix for anomalous orchards
     """
-    num_clusters = len(np.unique(labels, return_counts=True))
-    num_noise = list(labels).count(-1)
-    total_points = len(labels)
+    for orchard_id, pr in pr_dict.items():
+        print(f"\nORCHARD ID: {orchard_id}    PREDICTION: {pred_list[pr]}     GROUND TRUTH: {pred_list[gt_dict[orchard_id]]}")
     
-    # score for number of clusters
-    if num_clusters == 1:
-        anomaly_score = 0
-    elif num_clusters == 2:
-        anomaly_score = 10
-    else:
-        anomaly_score = 50
-    
-    # add ratio of noise to total
-    noise_ratio = num_noise / total_points
-    anomaly_score += noise_ratio * 100
-    
-    # adjust for cluster size variance
-    if num_clusters > 1:
-        cluster_sizes = [list(labels).count(i) for i in range(max(labels) + 1)]
-        size_variance = max(cluster_sizes) / min(cluster_sizes)
-        anomaly_score += min(size_variance * 10, 25)
-    
-    return min(anomaly_score, 100)
+    print("ORCHARD CLASSIFICATION ACCURACY:", np.sum([1 for k, v in pr_dict.items() if v == gt_dict[k]]) / len(pr_dict))
+    disp_anom = ConfusionMatrixDisplay(anomalous_cm, display_labels=["Normal", "Anomalous"])
+    f1_anom = 2 * anomalous_cm[1, 1] / (2 * anomalous_cm[1, 1] + anomalous_cm[0, 1] + anomalous_cm[1, 0])
+    disp_norm = ConfusionMatrixDisplay(normal_cm, display_labels=["Normal", "Anomalous"])
+    f1_norm = 2 * normal_cm[0, 0] / (2 * normal_cm[0, 0] + normal_cm[1, 0] + normal_cm[0, 1])
+    disp_anom.plot(values_format='', cmap='Blues')
+    plt.title("Anomalous Orchards Confusion Matrix")
+    plt.show()
+    disp_norm.plot(values_format='', cmap='Blues')
+    plt.title("Normal Orchards Confusion Matrix")
+    plt.show()
+    print("ANOMALOUS ORCHARD F1 SCORE:", f1_anom)
+    print("NORMAL ORCHARD F1 SCORE:", f1_norm)
 
 if __name__ == "__main__":
     arg_parser = ArgumentParser()
@@ -311,25 +356,14 @@ if __name__ == "__main__":
     args = arg_parser.parse_args()
     with open(args.config, "r") as f:
         params = yaml.safe_load(f)
-    
+
+    pred_list = {-1: "Anomalous", 1: "Normal"}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    data_loader = get_loaders(params)
-    if params["method"] == "Z":
-        pr_dict = infer_zstat(params, data_loader, device)
-    elif params["method"] == "ISO_FOREST":
-        pr_dict = infer_iso_forest(params, data_loader, device)
-    elif params["method"] == "DBSCAN":
-        pr_dict = infer_dbscan(params, data_loader, device)
-    else:
-        print("[ERROR] UNKNOWN METHOD")
-    
-
-    #print(pr_dict)
-
-    gt = [gt_dict[orchard_id] for orchard_id in pr_dict.keys()]
-    pr = list(pr_dict.values())
-    cm = confusion_matrix(gt, pr)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Normal", "Anomalous"])
-    disp.plot()
-    plt.show()
+    #plot_score_grid(get_scores_loc(params, get_loaders(params), device))
+    score_dict = get_scores_loc(params, get_loaders(params), device)
+    pr_dict, normal_cm, anomalous_cm = infer_iso_forest(params, score_dict)
+    print("===================== ISOLATION FOREST =====================")
+    print_results(pr_dict, normal_cm, anomalous_cm)
+    pr_dict, normal_cm, anomalous_cm = infer_dbscan(params, score_dict)
+    print("========================== DBSCAN ==========================")
+    print_results(pr_dict, normal_cm, anomalous_cm)

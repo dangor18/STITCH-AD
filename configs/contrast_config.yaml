@@ -9,7 +9,7 @@ model_path: checkpoints/RD4SAD-97.65.pth
 architecture: "wide_resnet50_2"
 bn_attention: False
 
-loss_weights: [1.0, 1.0, 1.0]
+feature_weights: [1.0, 1.0, 1.0]
 score_weight: 0.0
 
 proj_loss_weight: 0.758175413875071

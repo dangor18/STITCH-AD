@@ -12,10 +12,8 @@ score_weight: 0
 feature_weights: [1.0, 1.0, 1.0]
 
 # classifier params
-method: ISO_FOREST
-threshold: 3.5        # for z stat
-contamination: 0.05   # for isolation forest
-forest_threshold: 8  # for isolation forest
-eps: 0.1              # for DBSCAN
-min_samples: 10       # for DBSCAN
-min_score: 0.5        # for DBSCAN
+method: DBSCAN
+contamination: 0.05     # for isolation forest
+forest_threshold: 25    # for isolation forest
+min_cluster_size: 8     # for DBSCAN
+v_thresh: 1.5           # for DBSCAN

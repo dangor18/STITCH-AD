@@ -51,8 +51,8 @@ class inference_dataset(Dataset):
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
 
         # from filename get the x y location of patch (in patch coords)
-        x = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-2])
-        y = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-1])
+        x = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-1])
+        y = int(os.path.splitext(os.path.basename(filename))[0].split("_")[-2])
         label = meta["label"]
         image = np.load(filename)
         if self.resize_dim:

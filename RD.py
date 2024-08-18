@@ -172,7 +172,7 @@ def train_tuning(params, trial):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), score_mode=params.get("score_mode", "a"), temp=params["feature_weights"])
+            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"])
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -244,7 +244,7 @@ def train_normal(params, train_loader, test_loader, device):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], temp=params["feature_weights"],
+            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
                                                          score_weight=params.get("score_weight", 0.0))
             
             # collect aurocs for each orchard and total for plotting
@@ -265,7 +265,7 @@ def train_normal(params, train_loader, test_loader, device):
     return best_auroc
 
 def write_to_file(study, trial):
-    with open("logs/optuna_results.txt", "a") as f:
+    with open("logs/optuna_results_RD.txt", "a") as f:
         f.write(f"Trial {trial.number}:\n")
         f.write(f"  Value: {trial.value}\n")
         f.write("  Params:\n")
@@ -285,15 +285,15 @@ def objective(trial):
     with open(config, "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
-    params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
+    #params["learning_rate"] = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, log=True)
     #params["lr_factor"] = trial.suggest_float("lr_factor", low=0, high=0.5)
-    params["step"] = trial.suggest_int("step", low=1, high=10)
-    params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
+    #params["step"] = trial.suggest_int("step", low=1, high=10)
+    #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     #params["weight_decay"] = trial.suggest_float("weight_decay", low=1e-6, high=1e-2, log=True)
     #params["architecture"] = trial.suggest_categorical("architecture", ["wide_resnet50_2", "resnet50", "wide_resnet101_2", "asym"]) # asym for asymetric encoder decoder arch
-    params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE"])
-    params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
-    params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
+    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE"])
+    #params["beta1"] = trial.suggest_float("beta1", low=0.5, high=0.9999)
+    #params["beta2"] = trial.suggest_float("beta2", low=0.9, high=0.9999)
 
     params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
     params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
@@ -307,6 +307,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--config", default="configs/RD_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
+    parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()
 
     config = args.config
@@ -314,6 +315,20 @@ if __name__ == '__main__':
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
     setup_seed(111)
+
+    if args.test is True:
+        with open(config, "r") as config_file:
+            params = yaml.safe_load(config_file)
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        print("[INFO] DEVICE:", device) 
+        # create data loaders
+        print("[INFO] LOADING DATA...")
+        train_loader, test_loader = get_loaders(params)
+        encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
+        # test
+        test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
 
     # tune with optuna or train with default parameters from config file
     if args.tune is True:
