@@ -13,6 +13,8 @@ from sklearn.metrics import ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 from data.DL_inference import inference_dataset
 import time
+from tqdm import tqdm
+import json
 from sklearn.preprocessing import StandardScaler
 
 gt_dict = {
@@ -73,49 +75,6 @@ def load_model(params, device):
         print("[ERROR] UNKOWN MODEL")
         return None
 
-def get_scores(params, data_loader, device):
-    """
-        Return anomaly scores for patches for each orchard
-        ARGS:
-            params: dictionary containing parameters for the model
-            data_loader
-            device: device to run the model on
-    """
-    start_time = time.time()
-    print("GETTING PATCH DATA...")
-    score_dict = {}
-    # get model
-    if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model(params, device)
-    else:
-        encoder, bn, decoder, proj_layer = load_model(params, device)
-    
-    for input in data_loader:
-        patch = input['image'].to(device)
-        orchard_id = input['clsname'][0]
-        
-        if orchard_id not in score_dict:
-            score_dict[orchard_id] = []
-
-        with torch.no_grad():
-            if params["model_type"] == "RD":    # get score from model and add to list
-                inputs = encoder(patch)
-                outputs = decoder(bn(inputs))
-            elif params["model_type"] == "RDProj":
-                inputs = encoder(patch)
-                features = proj_layer(inputs)
-                outputs = decoder(bn(features))
-        anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
-        anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-        score = np.max(anomaly_map) + params.get("score_weight", 0) * np.mean(anomaly_map)
-        
-        score_dict[orchard_id].append(score)
-
-    end_time = time.time()
-    run_time = end_time - start_time
-    print("TIME (s):", run_time)
-    return score_dict
-
 def get_scores_loc(params, data_loader, device):
     """
         Return anomaly scores, location, and gt label for patches for each orchard
@@ -132,7 +91,7 @@ def get_scores_loc(params, data_loader, device):
     else:
         encoder, bn, decoder, proj_layer = load_model(params, device)
     
-    for input in data_loader:
+    for input in tqdm(data_loader):
         patch = input['image'].to(device)
         x, y = input['x'].item(), input['y'].item() # get x y location for patch from DL
         lbl = input['label'].item()
@@ -162,6 +121,10 @@ def get_scores_loc(params, data_loader, device):
     end_time = time.time()
     run_time = end_time - start_time
     print("TIME (s):", run_time)
+    # write dict to file (only used for the demo)
+    with open("data/score_dict.json", "w") as f:
+        json.dump(score_dict, f)
+
     return score_dict
 
 def get_loaders(params):
@@ -207,6 +170,7 @@ def infer_iso_forest(params, score_dict):
     
     # initialize isolation forest
     clf = IsolationForest(contamination=params["contamination"], random_state=42)
+    print("NUMBER OF OUTLIERS TO NORMAL PATCHES DETECTED FOR EACH ORCHARD:")
     #clf.fit(np.concatenate([scores for scores in score_dict.values()]).reshape(-1, 1))    # fit the isolation forest
     for orchard_id, data in score_dict.items():
         scores = np.array([item[2] for item in data])           # get each patches score
@@ -353,6 +317,7 @@ def print_results(pr_dict, normal_cm, anomalous_cm):
 if __name__ == "__main__":
     arg_parser = ArgumentParser()
     arg_parser.add_argument("--config", type=str, default="configs/inference.yaml")
+    arg_parser.add_argument("--demo", action="store_true", help="load stored data from DL model instead of infering on each patch. Just here for making the demo faster")
     args = arg_parser.parse_args()
     with open(args.config, "r") as f:
         params = yaml.safe_load(f)
@@ -360,7 +325,12 @@ if __name__ == "__main__":
     pred_list = {-1: "Anomalous", 1: "Normal"}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     #plot_score_grid(get_scores_loc(params, get_loaders(params), device))
-    score_dict = get_scores_loc(params, get_loaders(params), device)
+    if args.demo:
+        with open("data/score_dict.json", "r") as f:
+            score_dict = json.load(f)
+    else:
+        score_dict = get_scores_loc(params, get_loaders(params), device)
+
     pr_dict, normal_cm, anomalous_cm = infer_iso_forest(params, score_dict)
     print("===================== ISOLATION FOREST =====================")
     print_results(pr_dict, normal_cm, anomalous_cm)
