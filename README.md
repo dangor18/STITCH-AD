@@ -1,5 +1,6 @@
 ## Setting up the environment
 pip install -r requirements.txt
+python version 3.9.5 used
 ## Patch Making Pipeline:
 Linux:
 ```shell
@@ -178,6 +179,7 @@ working directory
 
 ## Running the orchard level models
 - python inference.py --config [config_file]
+- Patches are created the same as before, but anomaly threshold is set to 0 so as to not skip any patches
 
 ### Config file
 - `data_path`: ...

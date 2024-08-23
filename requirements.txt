@@ -1,9 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+
+numpy<2.0.0
 scipy
 scikit-learn
-scikit-learn-extra
-scikit-image
 pandas
-Pillow
+scikit-image
 opencv-python
 matplotlib
 rasterio
@@ -11,9 +14,7 @@ PyYAML
 tqdm
 optuna
 geomloss
+hdbscan
 imageio
 opencv_contrib_python
 numba
-# pip install torch==1.9.1+cu102 torchvision==0.10.1+cu102 -f https://download.pytorch.org/whl/torch_stable.html
-# pip install torch==1.9.1+cu111 torchvision==0.10.1+cu111 -f https://download.pytorch.org/whl/torch_stable.html
-# pip install torch==1.10.1+cu111 torchvision==0.11.2+cu111 -f https://download.pytorch.org/whl/cu111/torch_stable.html

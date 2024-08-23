@@ -122,7 +122,7 @@ def get_scores_loc(params, data_loader, device):
     run_time = end_time - start_time
     print("TIME (s):", run_time)
     # write dict to file (only used for the demo)
-    with open("data/score_dict.json", "w") as f:
+    with open(f"data/{params['model_type']}_score_dict.json", "w") as f:
         json.dump(score_dict, f)
 
     return score_dict
@@ -326,7 +326,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     #plot_score_grid(get_scores_loc(params, get_loaders(params), device))
     if args.demo:
-        with open("data/score_dict.json", "r") as f:
+        with open(f"data/{params['model_type']}_score_dict.json", "r") as f:
             score_dict = json.load(f)
     else:
         score_dict = get_scores_loc(params, get_loaders(params), device)
