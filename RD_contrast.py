@@ -278,6 +278,7 @@ if __name__ == '__main__':
     parser = ArgumentParser(description="")
     parser.add_argument("--config", default="configs/contrast_config.yaml", required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
+    parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()
 
     config = args.config
@@ -285,6 +286,29 @@ if __name__ == '__main__':
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
     setup_seed(111)
+    if args.test is True:
+        with open(config, "r") as config_file:
+            params = yaml.safe_load(config_file)
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+        print("[INFO] DEVICE:", device) 
+        # create data loaders
+        print("[INFO] LOADING DATA...")
+        train_loader, test_loader = get_loaders(params)
+            
+        # test
+        encoder, bn = wide_resnet50_2(pretrained=True, attention=params.get("bn_attention", False))
+        encoder = encoder.to(device)
+        bn = bn.to(device)
+        encoder.eval()
+        proj_layer =  MultiProjectionLayer(base=64).to(device)
+        decoder = de_wide_resnet50_2(pretrained=False)
+        decoder = decoder.to(device)
+        test_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+        exit()
+        
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")
         study = optuna.create_study(direction="maximize")

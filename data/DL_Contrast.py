@@ -208,11 +208,16 @@ class test_dataset(Dataset):
     
     def plot_channels(self, image, title):
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title)
-        for i, channel_name in enumerate(['dem', 'edge', 'red']):
-            axs[i].imshow(image[i].numpy(), cmap='gray')
+        fig.suptitle(title, size=16)
+        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
+            axs[i].set_xlabel('X')
+            axs[i].set_ylabel('Y')
             axs[i].set_title(f'{channel_name} Channel')
             axs[i].axis('off')
+            if i == 0:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
+            else:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
         plt.tight_layout()
         plt.show()
 

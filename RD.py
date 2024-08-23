@@ -327,9 +327,14 @@ if __name__ == '__main__':
         print("[INFO] LOADING DATA...")
         train_loader, test_loader = get_loaders(params)
         encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
+        encoder = encoder.to(device)
+        bn = bn.to(device)
+        encoder.eval()
+        decoder = decoder.to(device)
         # test
         test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
-
+        exit()
+        
     # tune with optuna or train with default parameters from config file
     if args.tune is True:
         print("[INFO] TUNING HYPERPARAMETERS...")

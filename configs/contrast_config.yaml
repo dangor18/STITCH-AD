@@ -1,23 +1,23 @@
-data_path: data/chunks/DRGB_80_RAW/
-meta_path: data/chunks/DRGB_80_RAW/metadata/
-log_path: logs/proj_optim_weights.txt
+data_path: data/chunks/DRGB_INF_TRAIN_3/
+meta_path: data/chunks/DRGB_INF_TRAIN_3/metadata/
+log_path: logs/RD_PROJ_WEIGHTED_CBAM_3.txt
 resize_x: 256
 resize_y: 256
 channels: 3
 
-model_path: checkpoints/RD4SAD-97.65.pth
+model_path: checkpoints/RD_PROJ_WEIGHTED_CBAM_3.pth
 architecture: "wide_resnet50_2"
-bn_attention: False
+bn_attention: CBAM
 
-feature_weights: [1.0, 1.0, 1.0]
-score_weight: 0.0
+feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
+score_weight: 0.483015283613563
 
 proj_loss_weight: 0.758175413875071
 ssot_weight: 0.015096731092610782
 contrast_weight: 0.9872387127026788
 reconstruct_weight: 0.6513426603306253
 
-num_epochs: 30
+num_epochs: 25
 batch_size: 32
 proj_lr: 0.001
 distill_lr: 0.005

@@ -128,9 +128,9 @@ def get_scores_loc(params, data_loader, device):
     print("GETTING PATCH DATA...")
     score_dict = {}
     if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model("RD", params["model_path"], params["channels"], device)
+        encoder, bn, decoder = load_model(params, device)
     else:
-        encoder, bn, decoder, proj_layer = load_model("RDProj", params["model_path"], params["channels"], device)
+        encoder, bn, decoder, proj_layer = load_model(params, device)
     
     for input in data_loader:
         patch = input['image'].to(device)
@@ -314,7 +314,7 @@ def infer_dbscan(params, score_dict):
         fig = plt.figure(figsize=(12, 10))
         ax = fig.add_subplot(111, projection='3d')
         
-        scatter = ax.scatter(features_normalized[:, 0], features_normalized[:, 1], features_normalized[:, 2], c=cluster_labels, cmap='set1')
+        scatter = ax.scatter(features_normalized[:, 0], features_normalized[:, 1], features_normalized[:, 2], c=cluster_labels, cmap='hsv')
         fig.colorbar(scatter)
         
         ax.set_title(f'3D Adaptive HDBSCAN Clustering for Orchard {orchard_id}')
