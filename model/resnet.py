@@ -36,6 +36,8 @@ def conv1x1(in_planes: int, out_planes: int, stride: int = 1, bias = False) -> n
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=bias)
 
+# attention block code obtained from: https://github.com/changzy00/pytorch-attention
+
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=16):
         super(SELayer, self).__init__()
