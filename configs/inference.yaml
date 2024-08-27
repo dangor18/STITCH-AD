@@ -14,5 +14,8 @@ score_weight: 0.483015283613563
 # classifier params
 contamination: 0.05     # for isolation forest
 forest_threshold: 25    # for isolation forest
-min_cluster_size: 8     # for DBSCAN
-v_thresh: 1.5           # for DBSCAN
+min_cluster_size: 5                     # for DBSCAN
+min_samples: 7                          # for DBSCAN
+epsilon: 0.45573170903500854            # for DBSCAN
+alpha: 0.7154196661308218               # for DBSCAN
+v_thresh: 1.3474146404292984            # for DBSCAN

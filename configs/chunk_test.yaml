@@ -1,0 +1,111 @@
+path: F:\Data\UOG_1676
+output_path: data\chunks\test\1676
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: C:\Users\Daniel\OneDrive - University of Cape Town\Uploads\mask_1676-new.tif
+reference: F:\Data\UOG_1676\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_1996
+output_path: data\chunks\test\1996
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: C:\Users\Daniel\OneDrive - University of Cape Town\Uploads\mask_1996.tif
+reference: F:\Data\UOG_1996\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_1883
+output_path: data\chunks\test\1883
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: F:\Data\UOG_1883\mask_1883.tif
+reference: F:\Data\UOG_1883\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_2057
+output_path: data\chunks\test\2057
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: C:\Users\Daniel\OneDrive - University of Cape Town\Uploads\mask_2057.tif
+reference: F:\Data\UOG_2057\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_2222
+output_path: data\chunks\test\2222
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: C:\Users\Daniel\OneDrive - University of Cape Town\Uploads\mask_2222.tif
+reference: F:\Data\UOG_2222\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_2228
+output_path: data\chunks\test\2228
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: F:\Data\UOG_2228\mask_2228.tif
+reference: F:\Data\UOG_2228\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5
+---
+path: F:\Data\UOG_1724
+output_path: data\chunks\test\1724
+files:
+  -
+    name: orthos\export-data\dem_full.tif
+    dimensions: 1
+  -
+    name: orthos\export-data\orthomosaic_visible.tif
+    dimensions: 3
+mask: F:\Data\UOG_1724\mask_1724.tif
+reference: F:\Data\UOG_1724\orthos\data-analysis\reg.tif
+chunk_size: 144
+chunk_overlap: 8
+anomaly_threshold: 0.8
+scale_ratio: 0.5

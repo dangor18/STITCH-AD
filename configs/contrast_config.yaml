@@ -1,11 +1,11 @@
-data_path: data/chunks/DRGB_INF_TRAIN_3/
-meta_path: data/chunks/DRGB_INF_TRAIN_3/metadata/
+data_path: data/chunks/DRGB_80/
+meta_path: data/chunks/DRGB_80/metadata/
 log_path: logs/RD_PROJ_WEIGHTED_CBAM_3.txt
 resize_x: 256
 resize_y: 256
 channels: 3
 
-model_path: checkpoints/RD_PROJ_WEIGHTED_CBAM_3.pth
+model_path: checkpoints/RD_PROJ_WEIGHTED_CBAM.pth
 architecture: "wide_resnet50_2"
 bn_attention: CBAM
 

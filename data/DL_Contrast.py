@@ -118,45 +118,34 @@ class train_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # only DEM
-        if np.ndim(image) == 2:
-            normal_image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            noise = self.get_noise()
-            noise *= np.std(image)  # change std dev to match that of orchard, as without this the noise affects some orchard patches more than others
-            img_noise = image + noise
-            #img_noise = self.overlay_blend(image, noise)
-            img_noise = torch.unsqueeze(torch.from_numpy(img_noise).float(), dim=0)
-            img_noise.clamp(0, 1)
-            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
-        else:
-            dem = image[:, :, 0]
-            dem_min = np.percentile(dem, 5)
-            dem_max = np.percentile(dem, 95)
-            dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-            grey = image[:, :, 1] / 255
-            sobel_dem = ndimage.sobel(dem)
-            sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        grey = image[:, :, 1] / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
 
-            dem_na= dem[:, :, np.newaxis]
-            sobel_dem_na = sobel_dem[:, :, np.newaxis]
-            grey_na = grey[:, :, np.newaxis]
-            normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
-            normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
+        dem_na= dem[:, :, np.newaxis]
+        sobel_dem_na = sobel_dem[:, :, np.newaxis]
+        grey_na = grey[:, :, np.newaxis]
+        normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
+        normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
             
-            choice = random.choice([1, 2])
-            if choice == 1:
-                dem_noise = self.get_psuedo_case1(dem)
-            elif choice == 2:
-                dem_noise = self.get_psuedo_case2(dem, amplitude=0.7)
+        choice = random.choice([1, 2])
+        if choice == 1:
+            dem_noise = self.get_psuedo_case1(dem)
+        elif choice == 2:
+            dem_noise = self.get_psuedo_case2(dem, amplitude=0.7)
 
-            sobel_noise = ndimage.sobel(dem_noise)
-            sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
-            dem_na = dem_noise[:, :, np.newaxis]
-            grey_na = grey[:, :, np.newaxis]
-            sobel_noise = sobel_noise[:, :, np.newaxis]
+        sobel_noise = ndimage.sobel(dem_noise)
+        sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
+        dem_na = dem_noise[:, :, np.newaxis]
+        grey_na = grey[:, :, np.newaxis]
+        sobel_noise = sobel_noise[:, :, np.newaxis]
 
-            img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
-            img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
+        img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
+        img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
         
         if self.normalize:
             img_noise = self.normalize(img_noise)
@@ -232,26 +221,21 @@ class test_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # only DEM
-        if np.ndim(image) == 2:
-            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
-        else:
-            dem = image[:, :, 0]
-            dem_min = np.percentile(dem, 5)
-            dem_max = np.percentile(dem, 95)
-            dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-            rgb = image[:, :, 1]
-            grey = rgb / 255
-            sobel_dem = ndimage.sobel(dem)
-            sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        rgb = image[:, :, 1]
+        grey = rgb / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
 
-            dem = dem[:, :, np.newaxis]
-            sobel_dem = sobel_dem[:, :, np.newaxis]
-            grey = grey[:, :, np.newaxis]
-            image = np.concatenate([dem, sobel_dem, grey], axis=2)
+        dem = dem[:, :, np.newaxis]
+        sobel_dem = sobel_dem[:, :, np.newaxis]
+        grey = grey[:, :, np.newaxis]
+        image = np.concatenate([dem, sobel_dem, grey], axis=2)
 
-            image = torch.from_numpy(image).float().permute(2, 0, 1)
+        image = torch.from_numpy(image).float().permute(2, 0, 1)
 
         input.update(
             {

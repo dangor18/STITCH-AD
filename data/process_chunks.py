@@ -54,7 +54,7 @@ def train_test_split(folder_path: str):
     else:
         print("No non-empty case folders found. No files moved to test/normal.")
 
-def main(root_dir: str, output_dir: str):
+def main(root_dir: str):
     orchards = [orchard for orchard in os.listdir(root_dir) 
                 if os.path.isdir(os.path.join(root_dir, orchard)) and 
                 is_orchard_folder(os.path.join(root_dir, orchard))]

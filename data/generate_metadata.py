@@ -3,10 +3,10 @@ import json
 import numpy as np
 import sys
 
-# Set the root directory where your dataset is located
+# set the root directory where your dataset is located
 root_dir = sys.argv[1]
 
-# Define the class names and their corresponding labels
+# patch labels
 class_labels = {
     "normal": 0,
     "case_1": 1,
@@ -14,21 +14,8 @@ class_labels = {
     "case_3": 3
 }
 
-# Function to read mean and std values from data_stats folder
-def read_stats(orchard_path):
-    stats_path = os.path.join(orchard_path, "data_stats")
-    mean_path = os.path.join(stats_path, "train_means.npy")
-    std_path = os.path.join(stats_path, "train_sdv.npy")
-    
-    if os.path.exists(mean_path) and os.path.exists(std_path):
-        mean = np.load(mean_path).tolist()
-        std = np.load(std_path).tolist()
-        return mean, std
-    else:
-        return None, None
-
 # Function to process files in a directory
-def process_directory(dir_path, class_name, split, orchard_name, mean, std):
+def process_directory(dir_path, class_name, split, orchard_name):
     metadata = []
     for filename in os.listdir(dir_path):
         if filename.endswith(".npy"):
@@ -37,8 +24,6 @@ def process_directory(dir_path, class_name, split, orchard_name, mean, std):
                 "filename": relative_path,
                 "label": class_labels[class_name],
                 "clsname": orchard_name,
-                "mean": mean,
-                "std": std
             }
             metadata.append(metadata_entry)
     return metadata
@@ -49,14 +34,13 @@ all_metadata = {"train": [], "test": []}
 for orchard in os.listdir(root_dir):
     orchard_path = os.path.join(root_dir, orchard)
     if os.path.isdir(orchard_path):
-        mean, std = read_stats(orchard_path)
         
         # Process training data
         train_dir = os.path.join(orchard_path, "train")
         if os.path.exists(train_dir):
             normal_dir = os.path.join(train_dir, "normal")
             if os.path.exists(normal_dir):
-                all_metadata["train"].extend(process_directory(normal_dir, "normal", "train", orchard, mean, std))
+                all_metadata["train"].extend(process_directory(normal_dir, "normal", "train", orchard))
         
         # Process test data
         test_dir = os.path.join(orchard_path, "test")
@@ -64,7 +48,7 @@ for orchard in os.listdir(root_dir):
             for class_name in class_labels.keys():
                 class_dir = os.path.join(test_dir, class_name)
                 if os.path.exists(class_dir):
-                    all_metadata["test"].extend(process_directory(class_dir, class_name, "test", orchard, mean, std))
+                    all_metadata["test"].extend(process_directory(class_dir, class_name, "test", orchard))
 
 # Create metadata folder if it doesn't exist
 metadata_dir = os.path.join(root_dir, "metadata")

@@ -55,8 +55,8 @@ class CustomDataset(Dataset):
         
         if self.norm_choice == "IMAGE_NET":
             self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
-            self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
+        #elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
+            #self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
         else:
             self.normalize = None
 
@@ -89,36 +89,19 @@ class CustomDataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # only DEM
-        if np.ndim(image) == 2:
-            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
-        else:
-            dem = image[:, :, 0]
-            dem_min = np.percentile(dem, 5)
-            dem_max = np.percentile(dem, 95)
-            dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-            #dem = (dem - dem_min) / 4
-            #dem = (dem - dem.mean()) / dem.std()
-            #dem = dem - dem_min
-            #print(dem.min(), dem.max())
-            #dem = torch.unsqueeze(torch.from_numpy(dem).float(), dim=0)
-            rgb = image[:, :, 1]
-            grey = rgb / 255
-            #print(grey.min(), grey.max())
-            #grey = torch.unsqueeze(torch.from_numpy(grey).float(), dim=0)
-            #prewitt_dem = filters.prewitt(dem)
-            sobel_dem = ndimage.sobel(dem)
-            sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
-            #print(sobel_dem.min(), sobel_dem.max())
-            #prewitt_dem = prewitt_dem[:, :, np.newaxis]
-            dem = dem[:, :, np.newaxis]
-            sobel_dem = sobel_dem[:, :, np.newaxis]
-            grey = grey[:, :, np.newaxis]
-            image = np.concatenate([dem, sobel_dem, grey], axis=2)
-            #image = (image - np.min(image)) / (np.max(image) - np.min(image))
-            #self.normalize = transforms.Normalize(mean=np.mean(image), std=np.std(image))
-            image = torch.from_numpy(image).float().permute(2, 0, 1)
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        rgb = image[:, :, 1]
+        grey = rgb / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
+        dem = dem[:, :, np.newaxis]
+        sobel_dem = sobel_dem[:, :, np.newaxis]
+        grey = grey[:, :, np.newaxis]
+        image = np.concatenate([dem, sobel_dem, grey], axis=2)
+        image = torch.from_numpy(image).float().permute(2, 0, 1)
 
         input.update(
             {
