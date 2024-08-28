@@ -59,6 +59,7 @@ def cvt2heatmap(gray):
 def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
     Evaluate the model for multiple anomaly types
+    Returns: average_auroc, orchard_auroc_dict
     """
     bn.eval()
     decoder.eval()
@@ -111,11 +112,6 @@ def evaluation(encoder, bn, decoder, data_loader, device, log_path = None, score
             file.write("\n=== EVALUATION ===")
     
     for orchard_id, orchard_data in orchard_auroc_results.items():
-        #print(orchard_id)
-        # normalize scores with max anomaly score
-        #for key in ["pr_case1", "pr_case2", "pr_normal"]:
-            #orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
-
         # calc average scores for each case
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
@@ -222,10 +218,6 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
                 orchard_case_count[orchard_id]["normal"] += 1
     
     for orchard_id, orchard_data in orchard_auroc_results.items():
-        # normalize scores with max anomaly score
-        #for key in ["pr_case1", "pr_case2", "pr_normal"]:
-            #orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
-
         # calc average scores for each case
         auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
                                       orchard_data["pr_normal"] + orchard_data["pr_case1"])
@@ -258,6 +250,7 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
 def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
         Evaluate the model for multiple anomaly types
+        Returns: average_auroc, orchard_auroc_dict
     """
     encoder.eval()
     proj.eval()
@@ -311,11 +304,6 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
             file.write("\n=== EVALUATION ===")
     
     for orchard_id, orchard_data in orchard_auroc_results.items():
-        #print(orchard_id)
-        # normalize scores with max anomaly score
-        #for key in ["pr_case1", "pr_case2", "pr_normal"]:
-            #orchard_data[key] = [score / max_anomaly_score for score in orchard_data[key]]
-
         # calc average scores for each case
         orchard_anomaly_scores[orchard_id]["normal"][0] = round(sum(orchard_data["pr_normal"]) / orchard_case_count[orchard_id]["normal"], 5)
         orchard_anomaly_scores[orchard_id]["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)

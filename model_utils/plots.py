@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import torch
 
 def plot_sample(image, label, anomaly_score, orchard_id):
+    """
+        Plot each channel of an image, with label and anomaly score for a given orchard
+    """
     fig, axs = plt.subplots(1, 4, figsize=(15, 5))
     # remove batch dimension
     image = torch.squeeze(image, 0)
@@ -22,6 +25,10 @@ def plot_sample(image, label, anomaly_score, orchard_id):
     plt.show()
 
 def plot_histogram(case_1_scores, case_2_scores, case_3_scores, normal_scores, orchard_id):
+    """
+    Plot histogram for score distribution
+    ARGS: case 1 scores, case 2 scores, case 3 scores, normal scores, orchard id: str 
+    """
     plt.figure(figsize=(12, 6))
     combined_scores = np.concatenate([normal_scores] + ([case_1_scores] if len(case_1_scores) > 0 else []) + ([case_2_scores] if len(case_2_scores) > 0 else [])  + ([case_3_scores] if len(case_3_scores) > 0 else []))
     
@@ -55,6 +62,9 @@ def plot_histogram(case_1_scores, case_2_scores, case_3_scores, normal_scores, o
     plt.show()
 
 def plot_auroc(auroc_dict):
+    """
+        Plot the auroc dict accumalated during training for per orchard auroc at each epoch
+    """
     plt.figure(figsize=(12, 6))
     x = auroc_dict.keys()
     temp_dict = {}

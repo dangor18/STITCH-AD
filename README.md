@@ -1,5 +1,6 @@
 ## Setting up the environment
 pip install -r requirements.txt
+
 python version 3.9.5 used
 ## Patch Making Pipeline:
 Linux:
@@ -15,7 +16,7 @@ This will run three files in sequence:
   2. `process_chunks.py`
   3. `generate_metadata.py`
 
-And assumes a correctly formatted config file with the default name `config.yaml`.
+And assumes a correctly formatted config file with a default name `config.yaml`.
 Config files can be added to the script given to chunker.py
 
 ## Chunk / Patch Creator
@@ -35,13 +36,13 @@ Config files can be added to the script given to chunker.py
 - `reference`: The path to the .tif file to be used for clipping against and for reading in nodata values to skip over for a patch. This doesn't have to be a layer considered for a chunk. DO NOT MAKE RGB.
 - `chunk_size`: The width/height of the chunks in 10^-6 of a degree. The chunks are square.
 - `chunk_overlap`: The length of the overlap between chunks in 10^-6 of a degree.
-- `threshold`: The percentage a chunk must overlap with an anomalous region to be considered an anomalous chunk.
+- `anomaly_threshold`: The percentage a chunk must overlap with an anomalous region to be considered an anomalous chunk.
 - `scale_ratio`: The factor the width and height the rgb image's dimensions are multiplied by to achieve a resolution all channels for a given orchard are upscaled to.
 
 ### Example:
 ```yaml
 path: A:/STITCH-O/UOG_1676
-output_path: chunks/
+output_path: chunks/1676/
 files:
   -
     name: orthos/data-analysis/lwir.tif
@@ -63,7 +64,6 @@ reference: A:/STITCH-O/UOG_1676/orthos/data-analysis/reg.tif
 chunk_size: 256
 chunk_overlap: 50
 anomaly_threshold: 0.7
-normal_threshold: 0.0
 scale_ratio: 0.5
 ---
 repeat for next orchard
@@ -83,6 +83,7 @@ A:/STITCH-O/UOG_1676
 
 
 Output Example:
+
 working directory
 ├── chunker.py
 └── chunks
@@ -117,7 +118,7 @@ working directory
         └── train_metadata.json
 ```
 
-## Running the patch level model
+## Running the patch level models
 - To train the regular Reverse Distillation model from scratch, run RD.py --config [config_file]
 - To train the contrastive learning RD model, run RD_contrast.py --config [config_file]
 - To test a saved model and get final results, run RD.py --test --config [config_file]
@@ -196,4 +197,7 @@ working directory
 - `contamination`: Parameter for ISO forest. Default to 0.05
 - `forest_threshold`: Parameter for ISO forest thresholding number of outliers to classify orchard. Set to 25
 - `min_cluster_size`: Parameter for HDBSCAN for minimum size of a cluster to be considered as possibly anomalous. Set to 5.
-- `v_thresh`: Parameter for HDBSCAN for minimum average score (or height) of cluster above the normalized average of the normal / largest cluster. Set to 1.5.
+- `min_samples`: Paramter for HDBSCAN. Set to 7                          
+- `epsilon`: Paramter for HDBSCAN. Set to 0.45573170903500854            
+- `alpha`: Paramter for HDBSCAN. Set to 0.7154196661308218  
+- `v_thresh`: Parameter for HDBSCAN for minimum average score (or height) of cluster above the normalized average of the normal / largest cluster. Set to 1.3.

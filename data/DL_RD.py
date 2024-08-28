@@ -64,6 +64,9 @@ class CustomDataset(Dataset):
         return len(self.metas)
     
     def plot_channels(self, image, title):
+        """
+            Plot data channels when loading data, used for testing
+        """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title)
         for i, channel_name in enumerate(['dem', 'edge', 'red']):

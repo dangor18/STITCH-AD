@@ -24,7 +24,6 @@ class train_dataset(Dataset):
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        #self.random_erasing = transforms.RandomErasing(p=0.25, scale=(0.5, 0.8), ratio=(0.3, 3.3), value=0, inplace=False)
         
         # construct metas
         with open(self.meta_file, "r") as f_r:
@@ -37,6 +36,9 @@ class train_dataset(Dataset):
         return len(self.metas)
     
     def plot_channels(self, image, title):
+        """
+            Plot data channels when loading data, used for testing
+        """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title, size=16)
         for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
@@ -52,16 +54,20 @@ class train_dataset(Dataset):
         plt.show()
 
     def get_psuedo_case1(self, dem, seed=None):
+        """
+            Returns psuedo case 1 by erasing a random portion of the dem and applying a smoothed out gradient
+        """
         if seed is not None:
             np.random.seed(seed)
-    
+
+        # set sizes
         size = 256
         h_noise = np.random.randint(128, 200)
         w_noise = np.random.randint(128, 200)
         start_h_noise = np.random.randint(1, size - h_noise)
         start_w_noise = np.random.randint(1, size - w_noise)
         
-        # Random scales and rotation
+        # random scales and rotation
         scale_x = np.random.uniform(0.5, 2.0)
         scale_y = np.random.uniform(0.5, 2.0)
         rotation = np.random.uniform(0, 2*np.pi)
@@ -70,7 +76,7 @@ class train_dataset(Dataset):
         x = x / w_noise - 0.5
         y = y / h_noise - 0.5
     
-        # Apply rotation
+        # apply rotation
         x_rot = x * np.cos(rotation) - y * np.sin(rotation)
         y_rot = x * np.sin(rotation) + y * np.cos(rotation)
     
@@ -80,19 +86,23 @@ class train_dataset(Dataset):
         gradient = gradient_x + gradient_y
         gradient = (gradient - np.min(gradient)) / (np.max(gradient) - np.min(gradient))
 
+        # get mean and std dev of region you're erasing to normalize grad
         mean = np.mean(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
         std = np.std(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
-        # Random intensity
+
         intensity = np.random.uniform(3, 4) * std
         gradient = gradient * intensity + mean - intensity/2
         
-        # Apply the gradient to the specified region
+        # apply the gradient to the specified region
         dem_copy = dem.copy()
         dem_copy[start_h_noise:start_h_noise + h_noise, start_w_noise:start_w_noise + w_noise] = gradient
         
         return dem_copy
 
     def get_psuedo_case2(self, dem, amplitude=1):
+        """"
+            Return psuedo case 2 by adding simplex noise to the dem
+        """
         # add simplex noise to create pseudo abnormal sample
         size = 256
         h_noise = np.random.randint(128, 200)
@@ -118,6 +128,7 @@ class train_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
+        # get normal data
         dem = image[:, :, 0]
         dem_min = np.percentile(dem, 5)
         dem_max = np.percentile(dem, 95)
@@ -131,7 +142,8 @@ class train_dataset(Dataset):
         grey_na = grey[:, :, np.newaxis]
         normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
         normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
-            
+        
+        # randomly choose either case 1 or 2 psuedo-artefact
         choice = random.choice([1, 2])
         if choice == 1:
             dem_noise = self.get_psuedo_case1(dem)
@@ -196,6 +208,9 @@ class test_dataset(Dataset):
         return len(self.metas)
     
     def plot_channels(self, image, title):
+        """
+            Plot data channels when loading data, used for testing
+        """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title, size=16)
         for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):

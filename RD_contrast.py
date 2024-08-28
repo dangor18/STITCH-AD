@@ -28,6 +28,9 @@ def setup_seed(seed):
     torch.backends.cudnn.benchmark = False
 
 def get_loaders(params):
+    """
+        Returns the train and test loader given the param config dict 
+    """
     train_data = train_dataset(
         params["meta_path"] + "train_metadata.json", 
         params["data_path"], 
@@ -172,6 +175,7 @@ def train(params, train_loader, test_loader, device):
         accumulation_steps = 2
         
         for i, input in enumerate(tqdm(train_loader)):
+            # input normal and psuedo-artefact image into model
             img = input['normal_image'].to(device)
             img_noise = input['abnormal_image'].to(device)
             inputs = encoder(img)
@@ -203,10 +207,12 @@ def train(params, train_loader, test_loader, device):
         with open(params["log_path"], "a") as log_file:
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
+        # evaluate model
         total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
         auroc_dict[epoch+1] = orchard_auroc_dict
         print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
+        # save model if improved
         if total_auroc > best_auroc:
             best_auroc = total_auroc
             best_epoch = epoch
@@ -225,6 +231,9 @@ def train(params, train_loader, test_loader, device):
     return best_auroc, best_epoch
 
 def write_to_file(study, trial):
+    """
+        Write tuning output after each trial to a text file
+    """
     with open("logs/optuna_results_proj.txt", "a") as f:
         f.write(f"Trial {trial.number}:\n")
         f.write(f"  Value: {trial.value}\n")

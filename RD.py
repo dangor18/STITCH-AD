@@ -35,6 +35,9 @@ def setup_seed(seed):
     torch.backends.cudnn.benchmark = True
 
 def get_loaders(params):
+    """
+        Returns the train and test loader given the param config dict 
+    """
     transform_fn = transforms.Compose([
                 #transforms.RandomHorizontalFlip(p=params["flip"]),
                 #transforms.RandomVerticalFlip(p=params["flip"]),
@@ -260,11 +263,15 @@ def train_normal(params, train_loader, test_loader, device):
             
             scheduler.step()
     
+    # after training load best model and get final metrics
     test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
     plot_auroc(auroc_dict)
     return best_auroc
 
 def write_to_file(study, trial):
+    """
+        Write tuning output to a text file
+    """
     with open("logs/optuna_results_RD.txt", "a") as f:
         f.write(f"Trial {trial.number}:\n")
         f.write(f"  Value: {trial.value}\n")
@@ -315,7 +322,8 @@ if __name__ == '__main__':
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
     setup_seed(111)
-
+    
+    # if testing model listed in config
     if args.test is True:
         with open(config, "r") as config_file:
             params = yaml.safe_load(config_file)

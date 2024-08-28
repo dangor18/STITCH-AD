@@ -58,30 +58,21 @@ class inference_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # only DEM
-        if np.ndim(image) == 2:
-            image = torch.unsqueeze(torch.from_numpy(image).float(), dim=0)
-            self.normalize = transforms.Normalize(mean=[0.449], std=[0.226])
-        else:
-            dem = image[:, :, 0]
-            dem_min = np.percentile(dem, 5)
-            dem_max = np.percentile(dem, 95)
-            dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-            #dem = torch.unsqueeze(torch.from_numpy(dem).float(), dim=0)
-            rgb = image[:, :, 1]
-            grey = rgb / 255
-            #grey = torch.unsqueeze(torch.from_numpy(grey).float(), dim=0)
-            #prewitt_dem = filters.prewitt(dem)
-            sobel_dem = ndimage.sobel(dem)
-            sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        rgb = image[:, :, 1]
+        grey = rgb / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - np.min(sobel_dem)) / (np.max(sobel_dem) - np.min(sobel_dem))
 
-            #prewitt_dem = prewitt_dem[:, :, np.newaxis]
-            dem = dem[:, :, np.newaxis]
-            sobel_dem = sobel_dem[:, :, np.newaxis]
-            grey = grey[:, :, np.newaxis]
-            image = np.concatenate([dem, sobel_dem, grey], axis=2)
+        dem = dem[:, :, np.newaxis]
+        sobel_dem = sobel_dem[:, :, np.newaxis]
+        grey = grey[:, :, np.newaxis]
+        image = np.concatenate([dem, sobel_dem, grey], axis=2)
 
-            image = torch.from_numpy(image).float().permute(2, 0, 1)
+        image = torch.from_numpy(image).float().permute(2, 0, 1)
 
         input.update(
             {
