@@ -142,20 +142,6 @@ def get_loaders(params):
     data_loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
     
     return data_loader
-    '''
-        Divide the scores into patches of size min_size. If the size of the scores is not a multiple of min_size, the last patch will contain random scores from the scores list
-    '''
-    patches = []
-    num_segments = len(scores) // min_size
-    diff = len(scores) - (num_segments * min_size)
-    random_scores = np.random.choice(scores, diff)
-
-    for i in range(num_segments-1):
-        patches.append(scores[i*min_size:(i+1)*min_size])
-    # add the last section with the random scores
-    patches.append(np.concatenate((scores[(num_segments-1)*min_size:], random_scores)))
-
-    return patches
 
 def infer_iso_forest(params, score_dict):
     '''
