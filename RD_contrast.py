@@ -315,7 +315,7 @@ if __name__ == '__main__':
         decoder = de_wide_resnet50_2(pretrained=False)
         decoder = decoder.to(device)
         test_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
-                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]), n_plot_per_class=3)
         exit()
         
     if args.tune is True:

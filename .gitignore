@@ -9,3 +9,6 @@ chunks
 *.pth
 *.json
 logs
+*.zip
+demo_notes.txt
+GRDDAN017-STITCHO/

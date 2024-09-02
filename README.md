@@ -1,3 +1,6 @@
+## Disclaimer
+These models were trained on orthomosaic data which is not made publicly available.
+
 ## Setting up the environment
 pip install -r requirements.txt
 
@@ -131,7 +134,7 @@ working directory
 - `resize_x`: The width to which images will be resized to.
 - `resize_y`: The height to which images will be resized to.
 - `channels`: The number of channels in the patches (supports 1 or 3 currently).
-- `model_path`: The path for saving the best model during evaluation.
+- `model_path`: The path for saving \ loading the best model during evaluation.
 - `architecture`: The architecture of the neural network model (Choice: resnet18, resnet50, wide_resnet50_2).
 - `bn_attention`: A flag for whether attention is applied to the bottleneck embedding. False or CBAM.
 - `loss_weights`: A list of weights for each scale of the loss function.

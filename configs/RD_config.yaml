@@ -8,13 +8,16 @@ flip: 0.3
 crop_min: 0.9
 norm_choice: "IMAGE_NET"
 
-model_path: checkpoints/RD_WEIGHTED_CBAM.pth
+model_path: checkpoints/RD.pth
 architecture: "wide_resnet50_2"
-bn_attention: CBAM
+bn_attention: False
+#bn_attention: CBAM
 optimizer: adam
 
-feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
-score_weight: 0.483015283613563
+#feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
+feature_weights: [1, 1, 1]
+#score_weight: 0.483015283613563
+score_weight: 0.0
 
 num_epochs: 100
 batch_size: 32
