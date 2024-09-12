@@ -217,6 +217,7 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
                 orchard_auroc_results[orchard_id]["pr_normal"].append(anomaly_score)
                 orchard_case_count[orchard_id]["normal"] += 1
     
+    final_auroc = 0
     for orchard_id, orchard_data in orchard_auroc_results.items():
         # calc average scores for each case
         auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
@@ -228,6 +229,7 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
         #auroc_total = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
                                       #orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
         auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
+        final_auroc += auroc_total
         print("[INFO] FINAL RESULTS:")
         print(f"- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
         plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_case3"], orchard_data["pr_normal"], orchard_id)
@@ -246,6 +248,8 @@ def test(encoder, bn, decoder, data_loader, device, model_path, score_weight = 1
         if n_plot_per_class > 0:        
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
+
+    print(f"[INFO] FINAL AVERAGE AUROC: {final_auroc / len(orchard_auroc_results)}")
 
 def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
@@ -412,6 +416,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
                 orchard_auroc_results[orchard_id]["pr_normal"].append(anomaly_score)
                 orchard_case_count[orchard_id]["normal"] += 1
     
+    final_auroc = 0
     for orchard_id, orchard_data in orchard_auroc_results.items():
         auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"]))], 
                                       orchard_data["pr_normal"] + orchard_data["pr_case1"])
@@ -422,6 +427,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
         #auroc_total = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case1"] + orchard_data["pr_case2"]))], 
                                       #orchard_data["pr_normal"] + orchard_data["pr_case1"] + orchard_data["pr_case2"])
         auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
+        final_auroc += auroc_total
         print("[INFO] FINAL RESULTS:")
         print(f"- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
         plot_histogram(orchard_data["pr_case1"], orchard_data["pr_case2"], orchard_data["pr_case3"], orchard_data["pr_normal"], orchard_id)
@@ -440,7 +446,9 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
         if n_plot_per_class > 0:        
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)
-            
+    
+    print(f"[INFO] FINAL AVERAGE AUROC: {final_auroc / len(orchard_auroc_results)}")
+
 def calculate_auroc(gt_list, pr_list):
     if len(set(gt_list)) == 2:
         auroc = round(roc_auc_score(gt_list, pr_list), 3)

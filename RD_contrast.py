@@ -27,7 +27,7 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_loaders(params):
+def get_loaders(params, test=False):
     """
         Returns the train and test loader given the param config dict 
     """
@@ -49,7 +49,7 @@ def get_loaders(params):
         params["data_path"], 
         (params["resize_x"], params["resize_y"]),
     )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
     
     return train_loader, test_loader
 
@@ -304,7 +304,7 @@ if __name__ == '__main__':
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")
-        train_loader, test_loader = get_loaders(params)
+        train_loader, test_loader = get_loaders(params, test=True)
             
         # test
         encoder, bn = wide_resnet50_2(pretrained=True, attention=params.get("bn_attention", False))

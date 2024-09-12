@@ -383,7 +383,7 @@ def get_F1(cm):
     """
         Calculate the F1 score from a confusion matrix
     """
-    tn, fp, fn, tp = cm.ravel()
+    tp, fp, fn, tn = cm.ravel()
     
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)

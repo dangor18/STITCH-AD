@@ -8,6 +8,7 @@ flip: 0.3
 crop_min: 0.9
 norm_choice: "IMAGE_NET"
 
+#model_path: checkpoints/RD_WEIGHTED_CBAM.pth
 model_path: checkpoints/RD.pth
 architecture: "wide_resnet50_2"
 bn_attention: False

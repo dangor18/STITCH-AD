@@ -182,7 +182,9 @@ working directory
 - `beta2_distill`: 0.999
 
 ## Running the orchard level models
-- python inference.py --config [config_file]
+- python inference.py --config [config_file]  (infers on each orchard patch in the data in the config file)
+- python inference.py --config [config_file] --test (loads saved model outputs from json files to get the final orchard level results)
+- python inference.py --config [config_file] --tune (tunes the HDBSCAN clustering parameters. Must have the results json writtent to data (done to speed up tuning.))
 - Patches are created the same as before, but anomaly threshold is set to 0 so as to not skip any patches
 
 ### Config file

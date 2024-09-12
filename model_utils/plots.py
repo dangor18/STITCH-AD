@@ -13,7 +13,10 @@ def plot_sample(image, label, anomaly_score, orchard_id):
     plt.title(orchard_id)
     for i, channel_name in enumerate(['dem', 'edge', 'red']):
         img = image[i].cpu().numpy()
-        axs[i].imshow(image[i].cpu().numpy(), cmap='gray')
+        if channel_name == "dem":
+            axs[i].imshow(image[i].cpu().numpy(), cmap='viridis')
+        else:
+            axs[i].imshow(image[i].cpu().numpy(), cmap='gray')
         axs[i].set_title(f'{channel_name} Channel')
         axs[i].axis('off')
     
