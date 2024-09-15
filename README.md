@@ -1,3 +1,7 @@
+## About
+Implementations of the [reverse distillation model (RD)](https://github.com/hq-deng/RD4AD) and [RD++](https://github.com/tientrandinh/Revisiting-Reverse-Distillation) for the remote sensing task of detecting stitching artefacts in orthomosaic images of orchards. These artefacts, can affect channels differently, mostly notable in the DEM and RGB channels. Fine tunings were made by including
+a [CBAM](https://github.com/changzy00/pytorch-attention) block and applying weights to the loss function and anomaly score.
+
 ## Disclaimer
 These models were trained on orthomosaic data which is not made publicly available.
 
@@ -20,7 +24,7 @@ This will run three files in sequence:
   3. `generate_metadata.py`
 
 And assumes a correctly formatted config file with a default name `config.yaml`.
-Config files can be added to the script given to chunker.py
+Config files can be added to the script given to `chunker.py`
 
 ## Chunk / Patch Creator
 

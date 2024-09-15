@@ -276,10 +276,10 @@ def infer_dbscan(params, score_dict):
         scatter = ax.scatter(features_normalized[:, 0], features_normalized[:, 1], features_normalized[:, 2], c=cluster_labels, cmap='viridis')
         fig.colorbar(scatter)
         
-        ax.set_title(f'3D Adaptive HDBSCAN Clustering for Orchard {orchard_id}')
-        ax.set_xlabel('X Location')
-        ax.set_ylabel('Y Location')
-        ax.set_zlabel('Score')
+        ax.set_title(f'3D Adaptive HDBSCAN Clustering for Orchard {orchard_id}', size=20)
+        ax.set_xlabel('X Location', size=15)
+        ax.set_ylabel('Y Location', size=15)
+        ax.set_zlabel('Score', size=15)
         plt.show()
         
     return pr_dict, normal_cm, anomalous_cm

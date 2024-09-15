@@ -18,7 +18,7 @@ from model.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
 from model.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
 from model_utils.test_utils import evaluation, test
 from model_utils.plots import plot_auroc
-from data.DL_RD import CustomDataset, AddGaussianNoise
+from data.DL_RD import CustomDataset
 from model_utils.train_utils import loss_function
 
 from tqdm import tqdm

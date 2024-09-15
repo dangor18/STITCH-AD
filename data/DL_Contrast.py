@@ -40,11 +40,11 @@ class train_dataset(Dataset):
             Plot data channels when loading data, used for testing
         """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title, size=16)
+        fig.suptitle(title, size=20)
         for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
-            axs[i].set_xlabel('X')
-            axs[i].set_ylabel('Y')
-            axs[i].set_title(f'{channel_name} Channel')
+            axs[i].set_xlabel('X', size=16)
+            axs[i].set_ylabel('Y', size=16)
+            axs[i].set_title(f'{channel_name} Channel', size=18)
             axs[i].axis('off')
             if i == 0:
                 plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
@@ -212,11 +212,11 @@ class test_dataset(Dataset):
             Plot data channels when loading data, used for testing
         """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title, size=16)
+        fig.suptitle(title, size=20)
         for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
-            axs[i].set_xlabel('X')
-            axs[i].set_ylabel('Y')
-            axs[i].set_title(f'{channel_name} Channel')
+            axs[i].set_xlabel('X', size=16)
+            axs[i].set_ylabel('Y', size=16)
+            axs[i].set_title(f'{channel_name} Channel', size=18)
             axs[i].axis('off')
             if i == 0:
                 plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
@@ -269,7 +269,7 @@ class test_dataset(Dataset):
 
         input.update({"image": image})
 
-        #self.plot_channels(image, "Original Image Channels")
+        #self.plot_channels(image, "Artefact Image Channels")
         #self.plot_channels(noisy_image, "Noisy Image Channels")
 
         return input
