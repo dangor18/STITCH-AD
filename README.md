@@ -1,5 +1,5 @@
 ## About
-Implementations of the [reverse distillation model (RD)](https://github.com/hq-deng/RD4AD) and [RD++](https://github.com/tientrandinh/Revisiting-Reverse-Distillation) for the remote sensing task of detecting stitching artefacts in orthomosaic images of orchards. These artefacts, can affect channels differently, mostly notable in the DEM and RGB channels. Fine tunings were made by including
+Implementations of the [reverse distillation model (RD)](https://github.com/hq-deng/RD4AD) and [RD++](https://github.com/tientrandinh/Revisiting-Reverse-Distillation) models for the remote sensing task of detecting stitching artefacts in orthomosaic images of orchards. These artefacts can affect channels differently, most notably in the DEM and RGB channels. Fine tunings were made by including
 a [CBAM](https://github.com/changzy00/pytorch-attention) block and applying weights to the loss function and anomaly score.
 
 ## Disclaimer
