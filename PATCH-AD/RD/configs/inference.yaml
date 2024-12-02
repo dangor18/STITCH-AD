@@ -1,0 +1,21 @@
+data_path: data/chunks/DRGB_INF_TEST/
+meta_path: data/chunks/DRGB_INF_TEST/metadata/
+resize_x: 256
+resize_y: 256
+channels: 3
+
+model_type: RDProj
+model_path: checkpoints/RD_PROJ_WEIGHTED_CBAM_1.pth
+architecture: "wide_resnet50_2"
+bn_attention: CBAM
+feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
+score_weight: 0.483015283613563
+
+# classifier params
+contamination: 0.05     # for isolation forest
+forest_threshold: 25    # for isolation forest
+min_cluster_size: 5                     # for DBSCAN
+min_samples: 7                          # for DBSCAN
+epsilon: 0.45573170903500854            # for DBSCAN
+alpha: 0.7154196661308218               # for DBSCAN
+v_thresh: 1.3474146404292984            # for DBSCAN
