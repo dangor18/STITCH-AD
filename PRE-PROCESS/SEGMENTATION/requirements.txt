@@ -1,0 +1,4 @@
+rasterio
+opencv
+torch
+segment_anything
