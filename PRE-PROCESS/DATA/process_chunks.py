@@ -66,6 +66,7 @@ def main(root_dir: str):
         train_test_split(orchard_path)
 
 if __name__ == "__main__":
+    random.seed(42)     # set seed for reproducibility
     parser = argparse.ArgumentParser(description="Preprocess and scale image data for orchards.")
     parser.add_argument("root_dir", type=str, help="Path to the root directory containing the orchard folders")
     args = parser.parse_args()
