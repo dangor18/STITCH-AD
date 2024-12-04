@@ -71,4 +71,4 @@ if __name__ == "__main__":
     parser.add_argument("root_dir", type=str, help="Path to the root directory containing the orchard folders")
     args = parser.parse_args()
     
-    main(args.root_dir)
+    main(os.path.join(os.path.dirname(os.path.realpath(__file__)), args.root_dir))

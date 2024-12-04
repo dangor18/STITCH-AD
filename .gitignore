@@ -1,0 +1,6 @@
+PRE-PROCESS/DATA/configs/*
+venv
+env
+myenv
+*.npy
+*.json

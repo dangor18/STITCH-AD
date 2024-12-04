@@ -4,7 +4,7 @@ import numpy as np
 import sys
 
 # set the root directory where your dataset is located
-root_dir = sys.argv[1]
+root_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), sys.argv[1])
 
 # patch labels
 class_labels = {

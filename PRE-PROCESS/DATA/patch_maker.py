@@ -288,8 +288,9 @@ def main():
     parser.add_argument("config", type=str, help="path to the .yaml configuration file")
 
     args = parser.parse_args()
+    cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
 
-    config_path = args.config
+    config_path = os.path.join(cwd, args.config)
     verbose = args.verbose
 
     if not os.path.exists(config_path):
@@ -331,7 +332,7 @@ def main():
                 mask_file = config["mask"]
                 # reference file used to determine nodata regions and clip the rasters against before upscaling
                 reference_file = config["reference"]
-                output_dir = config["output_path"]
+                output_dir = os.path.join(cwd, config["output_path"])
 
             except KeyError as e:
                 field = re.findall(r"'(.+?)'", str(e))[-1]

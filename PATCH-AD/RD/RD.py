@@ -246,7 +246,7 @@ def train_normal(params, train_loader, test_loader, device):
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
         # evaluate every 10 epochs
-        if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
+        if (epoch + 1) % 1 == 0:
             total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
                                                          score_weight=params.get("score_weight", 0.0))
             
@@ -311,8 +311,9 @@ def objective(trial):
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
+    cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", default="configs/RD_config.yaml", required=False)
+    parser.add_argument("--config", default=os.path.join(cwd, "configs/RD_config.yaml"), required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()

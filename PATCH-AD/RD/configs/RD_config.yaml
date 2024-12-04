@@ -1,5 +1,5 @@
-data_path: data/chunks/DRGB_80/
-meta_path: data/chunks/DRGB_80/metadata/
+data_path: PRE-PROCESS/DATA/PATCHES/DRGB_80/
+meta_path: PRE-PROCESS/DATA/PATCHES/DRGB_80/metadata/
 log_path: logs/RD_WEIGHTED_CBAM.txt
 resize_x: 256
 resize_y: 256
@@ -21,7 +21,7 @@ feature_weights: [1, 1, 1]
 score_weight: 0.0
 
 num_epochs: 100
-batch_size: 32
+batch_size: 4
 learning_rate: 0.005
 lr_factor: 0.333
 beta1: 0.9
