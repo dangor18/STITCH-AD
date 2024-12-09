@@ -4,3 +4,4 @@ env
 myenv
 *.npy
 *.json
+*.tif
