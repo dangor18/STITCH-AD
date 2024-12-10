@@ -16,6 +16,8 @@ import tqdm.contrib
 import tqdm.contrib.itertools
 import yaml
 
+import time
+
 def getTIFDimensions(file_name):
     """
     RETURNS WIDTH AND HEIGHT FOR TIF FILE
@@ -345,7 +347,9 @@ def main():
 
 if __name__ == "__main__":
     try:
+        start = time.time()
         main()
+        print(f"Execution time: {time.time() - start:.2f} seconds")
     except KeyboardInterrupt:
         print("Cancelling job...")
         exit()

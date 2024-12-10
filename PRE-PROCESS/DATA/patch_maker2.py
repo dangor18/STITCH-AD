@@ -30,6 +30,7 @@ def createPatches(orchard_id, files, dimensions, scaled_width, scaled_height, bl
     temp_dir = os.path.join(output_dir, "temp/")
     # include the reference TIF and the mask file in the list of files to reproject
     files.append(mask_file), files.append(reference)
+    files = list(map(lambda f: f.replace('\\', '/'), files))
     reprojectTIF(files, scaled_width, scaled_height, temp_dir, reference=reference, verbose=verbose)
 
     block_size_x, block_size_y, overlap_x, overlap_y = get_patch_size(temp_dir, block_size, overlap)
@@ -100,10 +101,9 @@ def createPatches(orchard_id, files, dimensions, scaled_width, scaled_height, bl
                 if verbose:
                     print(f'SAVED BLOCK {i}, {j} TO {block_file_name}')
     
-    # delete temp upscale tif folder and contents
     mask.close()
     nodata_ref.close()
-    src.close()
+    
     shutil.rmtree(temp_dir)
 
 def main():
