@@ -22,18 +22,14 @@ def createPatches(orchard_id, files, dimensions, scaled_width, scaled_height, bl
     PARAMETERS: Root path to files(for block naming), List of file names, list of bands for each file, desired width and height to upscale to, block size, block overlap, output directory for chunks
     """
     # make directories
-    case_1_dir = os.path.join(output_dir, "case_1")
-    case_2_dir = os.path.join(output_dir, "case_2")
-    case_3_dir = os.path.join(output_dir, "case_3")
-    normal_dir = os.path.join(output_dir, "normal")
-    os.makedirs(case_1_dir, exist_ok=True)
-    os.makedirs(case_2_dir, exist_ok=True)
-    os.makedirs(case_3_dir, exist_ok=True)
-    os.makedirs(normal_dir, exist_ok=True)
-    # upscale all tif images
+    output_subdirs = ["case_1", "case_2", "case_3", "normal"]
+    for subdir in output_subdirs:
+        os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
+    
+    # reproject all bands
     temp_dir = os.path.join(output_dir, "temp/")
+    # include the reference TIF and the mask file in the list of files to reproject
     files.append(mask_file), files.append(reference)
-    files = list(map(lambda f: f.replace('\\', '/'), files))    # TODO: remove this it's ugly and unnecessary
     reprojectTIF(files, scaled_width, scaled_height, temp_dir, reference=reference, verbose=verbose)
 
     block_size_x, block_size_y, overlap_x, overlap_y = get_patch_size(temp_dir, block_size, overlap)
@@ -66,42 +62,43 @@ def createPatches(orchard_id, files, dimensions, scaled_width, scaled_height, bl
                 nodata_ref_block = nodata_ref.read(1, window=win)
                     
                 # ignore these regions
-                if (not np.any(mask_block == 0)) and (not np.any(nodata_ref_block == -32767)):
-                    # stack each band data to block array
-                    block = np.stack([src.read(b, window=win) for b in range(1, num_bands + 1)])
-                    
-                    case_1_count = np.count_nonzero(mask_block == 1)
-                    case_2_count = np.count_nonzero(mask_block == 2)
-                    case_3_count = np.count_nonzero(mask_block == 3)
-                    
-                    # check for anomaly cases
-                    if case_1_count > anomaly_threshold * block_size_x * block_size_y:
-                        block_file_name = os.path.join(case_1_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    elif case_2_count > anomaly_threshold * block_size_x * block_size_y:
-                        block_file_name = os.path.join(case_2_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    elif case_3_count > anomaly_threshold * block_size_x * block_size_y:
-                        block_file_name = os.path.join(case_3_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    elif case_1_count + case_2_count + case_2_count == 0:
-                        block_file_name = os.path.join(normal_dir, f"{orchard_id}_block_{i}_{j}.npy")
-                    else:
-                        continue
-
-                    # check if block file exists and if so then append to data and write
-                    if os.path.exists(block_file_name):
-                        temp_block_data = np.load(block_file_name)
-                        temp_block_data = temp_block_data.transpose(2, 0, 1)
-                        updated_block = np.concatenate((temp_block_data, block), axis=0)
-                    else:
-                        # initialize file if block doesn't exist
-                        updated_block = block
-                            
-                    updated_block = updated_block.transpose(1, 2, 0)
-                    np.save(block_file_name, updated_block)
-                    if verbose:
-                        print(f'SAVED BLOCK {i}, {j} TO {block_file_name}')
-                else:
+                if (np.any(mask_block == 0) or np.any(nodata_ref_block == -32767)):
                     if verbose:
                         print(f'SKIPPING BLOCK {i}, {j}')
+                    continue
+
+                # stack each band data to block array
+                block = np.stack([src.read(b, window=win) for b in range(1, num_bands + 1)])
+                    
+                case_1_count = np.count_nonzero(mask_block == 1)
+                case_2_count = np.count_nonzero(mask_block == 2)
+                case_3_count = np.count_nonzero(mask_block == 3)
+                    
+                # check for anomaly cases
+                if case_1_count > anomaly_threshold * block_size_x * block_size_y:
+                    block_file_name = os.path.join(os.path.join(output_dir, "case_1"), f"{orchard_id}_block_{i}_{j}.npy")
+                elif case_2_count > anomaly_threshold * block_size_x * block_size_y:
+                    block_file_name = os.path.join(os.path.join(output_dir, "case_2"), f"{orchard_id}_block_{i}_{j}.npy")
+                elif case_3_count > anomaly_threshold * block_size_x * block_size_y:
+                    block_file_name = os.path.join(os.path.join(output_dir, "case_3"), f"{orchard_id}_block_{i}_{j}.npy")
+                elif case_1_count + case_2_count + case_3_count == 0:
+                    block_file_name = os.path.join(os.path.join(output_dir, "normal"), f"{orchard_id}_block_{i}_{j}.npy")
+                else:
+                    continue
+
+                # check if block file exists and if so then append to data and write
+                if os.path.exists(block_file_name):
+                    temp_block_data = np.load(block_file_name)
+                    temp_block_data = temp_block_data.transpose(2, 0, 1)
+                    updated_block = np.concatenate((temp_block_data, block), axis=0)
+                else:
+                    # initialize file if block doesn't exist
+                    updated_block = block
+                            
+                updated_block = updated_block.transpose(1, 2, 0)
+                np.save(block_file_name, updated_block)
+                if verbose:
+                    print(f'SAVED BLOCK {i}, {j} TO {block_file_name}')
     
     # delete temp upscale tif folder and contents
     mask.close()
@@ -164,7 +161,9 @@ def main():
 
 if __name__ == "__main__":
     try:
+        start = time.time()
         main()
+        print(f"Execution time: {time.time() - start:.2f} seconds")
     except KeyboardInterrupt:
         print("Cancelling job...")
         exit()
