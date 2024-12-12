@@ -7,19 +7,14 @@ import argparse
 import optuna
 
 import torch
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
-from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
-from torchvision import transforms
 import numpy as np
 
-from model.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
-from model.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
 from model_utils.test_utils import evaluation, test
 from model_utils.plots import plot_auroc
-from data.DL_RD import CustomDataset
-from model_utils.train_utils import loss_function
+from model_utils.train_utils import loss_function, get_loaders, get_optimizer, create_model
+from model.RD import RD
 
 from tqdm import tqdm
 
@@ -33,100 +28,6 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
-
-def get_loaders(params):
-    """
-        Returns the train and test loader given the param config dict 
-    """
-    transform_fn = transforms.Compose([
-                #transforms.RandomHorizontalFlip(p=params["flip"]),
-                #transforms.RandomVerticalFlip(p=params["flip"]),
-                #transforms.RandomResizedCrop(256, scale=(params["crop_min"], 1.0)),
-                #transforms.ColorJitter(contrast=(0.9, 1.1)),
-                #transforms.RandomRotation(degrees=params["degrees"]),
-    ])  
-    train_data = CustomDataset(
-        params["meta_path"] + "train_metadata.json", 
-        params["data_path"], 
-        transform_fn, 
-        (params["resize_x"], params["resize_y"]), 
-        noise_factor=0,
-        p=params["flip"],
-        norm_choice=params["norm_choice"],
-        channels=params.get("channels", 3)
-    )
-    train_loader = DataLoader(
-        train_data, 
-        batch_size=params["batch_size"], 
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-        prefetch_factor=2
-    )
-    test_data = CustomDataset(
-        params["meta_path"] + "test_metadata.json",
-        params["data_path"], 
-        None, 
-        (params["resize_x"], params["resize_y"]),
-        norm_choice=params["norm_choice"],
-        channels=params.get("channels", 3)
-    )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
-    
-    return train_loader, test_loader
-
-def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
-    """
-    Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
-    """
-    if architecture == "wide_resnet50_2":
-        encoder, bn = wide_resnet50_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
-        decoder = de_wide_resnet50_2(pretrained=False)
-    elif architecture == "resnet50":
-        encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
-        decoder = de_resnet50(pretrained=False)
-    elif architecture == "resnet18":
-        encoder, bn = resnet18(pretrained=True, attention=bn_attention, in_channels=in_channels)
-        decoder = de_resnet18(pretrained=False)
-    elif architecture == "wide_resnet101_2":
-        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
-        decoder = de_wide_resnet101_2(pretrained=False)
-    elif architecture == "asym":
-        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
-        decoder = de_wide_resnet50_2(pretrained=False)
-    elif architecture == "efficientNet":
-        encoder, bn = efficientnet_b0(pretrained=True, outblocks=[3, 5, 15], outstrides=[8, 16, 32])
-        decoder = model_utils.efficientnet.decoder.de_wide_resnet50_2(pretrained=False)
-    else:
-        raise ValueError(f"Unknown model architecture: {architecture}")
-    return encoder, bn, decoder
-
-def get_optimizer(config, model_params = None):
-    if str(config.get("optimizer", None)).upper() == "ADAM":
-        return torch.optim.Adam(
-            model_params, 
-            lr=config["learning_rate"], 
-            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
-        )
-    elif str(config.get("optimizer", None)).upper() == "SGD":
-        return torch.optim.SGD(
-            model_params,
-            lr=config["learning_rate"],
-            momentum=config["momentum"],
-            weight_decay=config["weight_decay"],
-            dampening=config.get("dampening", 0),
-        )
-    elif str(config.get("optimizer", None)).upper() == "ADAMW":
-        return torch.optim.AdamW(
-            model_params,
-            lr=config["learning_rate"],
-            betas=(config.get("beta1", 0.5), config.get("beta2", 0.999)),
-            weight_decay=config["weight_decay"]
-        )
-    else:
-        print("[ERROR] UNKOWN OPTIMIZER / NO OPTIMIZER CHOSEN")
-        return None
 
 def train_tuning(params, trial):
     """
@@ -167,8 +68,7 @@ def train_tuning(params, trial):
                 loss = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             
             optimizer.zero_grad()
-            #loss.backward()
-            #optimizer.step()
+
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -193,21 +93,7 @@ def train_normal(params, train_loader, test_loader, device):
     """
     Train the model (without hyperparameter) tuning on orchard patch data with the specified parameters and return the best overall AUROC score
     """
-    encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    encoder.eval()
-    decoder = decoder.to(device)
-    optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
-    #loss_fn = get_loss_fn(params)
-    # lr scheduler
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, 
-        step_size=params.get("step", 10),
-        gamma=params["lr_factor"],
-    )
-
-    scaler = GradScaler("cuda")
+    model = RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
 
     best_auroc = 0
     auroc_dict = {}
@@ -215,8 +101,7 @@ def train_normal(params, train_loader, test_loader, device):
     
     # train loop    
     for epoch in range(params["num_epochs"]):
-        bn.train()
-        decoder.train()
+        model.train()
         loss_sum = 0.0
         num_batches = 0
         
@@ -225,16 +110,14 @@ def train_normal(params, train_loader, test_loader, device):
         for input in train_data:
             images = input["image"].to(device)
             with autocast(device_type="cuda"):
-                inputs = encoder(images)
-                outputs = decoder(bn(inputs))
+                inputs, outputs = model(images)
                 loss = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             
-            optimizer.zero_grad()
-            #loss.backward()
-            #optimizer.step()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            model.optimizer.zero_grad()
+
+            model.scaler.scale(loss).backward()
+            model.scaler.step(model.optimizer)
+            model.scaler.update()
             
             loss_sum += loss.item()
             num_batches += 1
@@ -245,9 +128,9 @@ def train_normal(params, train_loader, test_loader, device):
         with open(params["log_path"], "a") as log_file:
             log_file.write(f"\nEPOCH {epoch + 1}, LOSS: {avg_loss:.3f}\n")
         
-        # evaluate every 10 epochs
+        # evaluate every 1 epoch
         if (epoch + 1) % 1 == 0:
-            total_auroc, orchard_auroc_dict = evaluation(encoder, bn, decoder, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
+            total_auroc, orchard_auroc_dict = evaluation(model, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
                                                          score_weight=params.get("score_weight", 0.0))
             
             # collect aurocs for each orchard and total for plotting
@@ -261,7 +144,7 @@ def train_normal(params, train_loader, test_loader, device):
                 print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
                 torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
             
-            scheduler.step()
+            model.scheduler.step()
     
     # after training load best model and get final metrics
     test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
