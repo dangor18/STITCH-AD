@@ -8,7 +8,7 @@ downscaling:
   num_workers: 12
 
 segmentation:
-  sam_checkpoint: "sam-segmentation/sam_vit_l_0b3195.pth"
+  sam_checkpoint: "PRE-PROCESS/SEGMENTATION/sam_vit_l_0b3195.pth"
   model_type: "vit_l"
   pixel_value_threshold: 0.3
   min_segment_size: 0.014
