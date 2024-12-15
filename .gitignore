@@ -6,4 +6,6 @@ myenv
 *.json
 *.tif
 *.pth
+*.log
 __pycache__
+PATCH-AD/UniAD/UniAD/*

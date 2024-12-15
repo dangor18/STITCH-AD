@@ -7,7 +7,8 @@ import time
 from tqdm import tqdm
 import torch
 import torch.optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import GradScaler
+from torch import autocast
 import yaml
 from datasets.data_builder import build_dataloader
 from easydict import EasyDict
@@ -214,12 +215,13 @@ def train_one_epoch(
         scaler = GradScaler()
 
     for i, input in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.trainer.max_epoch}", ncols=100)):
+        optimizer.zero_grad()
         curr_step = start_iter + i
         current_lr = lr_scheduler.get_last_lr()[0]
 
         data_time.update(time.time() - end)
 
-        with autocast():
+        with autocast(device_type='cuda'):
             outputs = model(input)
             loss = 0
             for name, criterion_loss in criterion.items():
@@ -231,7 +233,6 @@ def train_one_epoch(
         losses.update(reduced_loss.item())
 
         # backward
-        optimizer.zero_grad()
         scaler.scale(loss).backward()
         
         # update
