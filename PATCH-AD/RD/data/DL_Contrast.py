@@ -1,4 +1,5 @@
 import torch
+import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader, Dataset
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,12 +19,16 @@ class train_dataset(Dataset):
         meta_file,
         data_path,
         resize_dim=(256, 256),
+        transform_fn=None,
+        p_flip=0.5,
     ):
         self.meta_file = meta_file
         self.data_path = data_path
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.transform_fn = transform_fn
+        self.p_flip = p_flip
         
         # construct metas
         with open(self.meta_file, "r") as f_r:
@@ -117,6 +122,18 @@ class train_dataset(Dataset):
         dem_noise = dem + init_noise[:, :, 0]
         return dem_noise
     
+    def apply_flips(self, normal_img, noise_img):
+        """
+            Apply random flips to the normal and noise image
+        """
+        if random.random() > self.p_flip:
+            normal_img = F.hflip(normal_img)
+            noise_img = F.hflip(noise_img)
+        if random.random() > self.p_flip:
+            normal_img = F.vflip(normal_img)
+            noise_img = F.vflip(noise_img)
+        return normal_img, noise_img
+    
     def __getitem__(self, index):
         input = {}
         meta = self.metas[index]
@@ -159,10 +176,13 @@ class train_dataset(Dataset):
         img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
         img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
         
+        # apply flips
+        if self.transform_fn:
+            normal_image, img_noise = self.apply_flips(normal_image, img_noise)
+
+        # normalize
         if self.normalize:
             img_noise = self.normalize(img_noise)
-        # normalize NORMAL image patch
-        if self.normalize:
             normal_image = self.normalize(normal_image)
 
         input.update(

@@ -1,23 +1,16 @@
 import torch
-import torch.nn as nn
 import numpy as np
 import random
 import os
-from torch.utils.data import DataLoader
 from tqdm import tqdm
-import pandas as pd
-import matplotlib.pyplot as plt
-import json
 import optuna
 from argparse import ArgumentParser
 import yaml
-from torch.amp import autocast, GradScaler
-from model.resnet import resnet18, resnet34, resnet50, wide_resnet50_2
-from model.de_resnet import de_resnet18, de_resnet34, de_wide_resnet50_2, de_resnet50
 from model_utils.test_utils import evaluation_multi_proj, test_multi_proj
-from model_utils.train_utils import MultiProjectionLayer, Revisit_RDLoss, loss_function
+from model_utils.train_utils import Revisit_RDLoss, loss_function, get_loaders_proj
 from model_utils.plots import plot_auroc
-from data.DL_Contrast import test_dataset, train_dataset
+
+from model.RevisitingRD import RevistingRD
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -27,101 +20,45 @@ def setup_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def get_loaders(params, test=False):
-    """
-        Returns the train and test loader given the param config dict 
-    """
-    train_data = train_dataset(
-        params["meta_path"] + "train_metadata.json", 
-        params["data_path"], 
-        (params["resize_x"], params["resize_y"]), 
-    )
-    train_loader = DataLoader(
-        train_data, 
-        batch_size=params["batch_size"], 
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
-    test_data = test_dataset(
-        params["meta_path"] + "test_metadata.json",
-        params["data_path"], 
-        (params["resize_x"], params["resize_y"]),
-    )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
-    
-    return train_loader, test_loader
-
 def train_tuning(params, trial):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train_loader, test_loader = get_loaders(params)
-
-    encoder, bn = wide_resnet50_2(pretrained=True, attention=params.get("bn_attention", False))
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    encoder.eval()
-
-    decoder = de_wide_resnet50_2(pretrained=False)
-    decoder = decoder.to(device)
-    
-    proj_layer =  MultiProjectionLayer(base=64).to(device)
+    train_loader, test_loader = get_loaders_proj(params)
+    model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
     proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))
-    optimizer_proj = torch.optim.Adam(list(proj_layer.parameters()), lr=params.get("proj_lr", 0.001), betas=(params.get("beta1_proj", 0.5),params.get("beta2_proj", 0.999)))
-    optimizer_distill = torch.optim.Adam(list(decoder.parameters())+list(bn.parameters()), lr=params.get("distill_lr", 0.005), betas=(params.get("beta1_distill", 0.5),params.get("beta2_distill", 0.999)))
-
-    # lr schedulers
-    distill_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer_distill, 
-        step_size=10,
-        gamma=params["distill_lr_factor"],
-    )
-    proj_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer_proj, 
-        step_size=10,
-        gamma=params["proj_lr_factor"],
-    )
 
     best_auroc = 0
     best_epoch = 0
     num_epoch = params.get("num_epochs", 100)
 
     for epoch in range(1,num_epoch+1):
-        bn.train()
-        proj_layer.train()
-        decoder.train()
-        
+        model.train()
         ## gradient acc
         accumulation_steps = 2
         
         for i, input in enumerate(train_loader):
             img = input['normal_image'].to(device)
             img_noise = input['abnormal_image'].to(device)
-            inputs = encoder(img)
-            inputs_noise = encoder(img_noise)
-
-            (feature_space_noise, feature_space) = proj_layer(inputs, features_noise = inputs_noise)
+            (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)
 
             L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
-
-            outputs = decoder(bn(feature_space))
             L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
             loss.backward()
+
             if (i + 1) % accumulation_steps == 0:
-                optimizer_proj.step()
-                optimizer_distill.step()
+                model.optimizer_proj.step()
+                model.optimizer_distill.step()
                 # Clear gradients
-                optimizer_proj.zero_grad()
-                optimizer_distill.zero_grad()
+                model.optimizer_proj.zero_grad()
+                model.optimizer_distill.zero_grad()
         
-        total_auroc, _ = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
+        total_auroc, _ = evaluation_multi_proj(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
         if total_auroc > best_auroc:
             best_auroc = total_auroc
         
-        distill_scheduler.step()
-        proj_scheduler.step()
+        model.distill_scheduler.step(metrics=L_distill)
+        model.proj_scheduler.step(metrics=L_proj)
 
         # prune training if necessary (bad params)
         trial.report(total_auroc, epoch)
@@ -131,31 +68,8 @@ def train_tuning(params, trial):
     return best_auroc
 
 def train(params, train_loader, test_loader, device):
-    encoder, bn = wide_resnet50_2(pretrained=True, attention=params.get("bn_attention", False))
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    encoder.eval()
-
-    decoder = de_wide_resnet50_2(pretrained=False)
-    decoder = decoder.to(device)
-    
-    proj_layer =  MultiProjectionLayer(base=64).to(device)
-    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))
-    optimizer_proj = torch.optim.Adam(list(proj_layer.parameters()), lr=params.get("proj_lr", 0.001), betas=(params.get("beta1_proj", 0.5),params.get("beta2_proj", 0.999)))
-    optimizer_distill = torch.optim.Adam(list(decoder.parameters())+list(bn.parameters()), lr=params.get("distill_lr", 0.005), betas=(params.get("beta1_distill", 0.5),params.get("beta2_distill", 0.999)))
-
-    # lr schedulers
-    distill_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer_distill, 
-        step_size=10,
-        gamma=params["distill_lr_factor"],
-    )
-    proj_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer_proj, 
-        step_size=10,
-        gamma=params["proj_lr_factor"],
-    )
-
+    model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
+    proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))  # projective loss function
     best_auroc = 0
     best_epoch = 0
     
@@ -164,9 +78,7 @@ def train(params, train_loader, test_loader, device):
     
     print("[INFO] TRAINING MODEL...")
     for epoch in range(1,num_epoch+1):
-        bn.train()
-        proj_layer.train()
-        decoder.train()
+        model.train()
         loss_proj_sum = 0
         loss_distill_sum = 0
         total_loss_sum = 0
@@ -174,27 +86,23 @@ def train(params, train_loader, test_loader, device):
         ## gradient acc
         accumulation_steps = 2
         
-        for i, input in enumerate(tqdm(train_loader)):
+        for i, input in enumerate(tqdm(train_loader, desc=f"Distill LR: {model.distill_scheduler.get_last_lr()[0]}, Proj LR: {model.proj_scheduler.get_last_lr()[0]}")):
             # input normal and psuedo-artefact image into model
             img = input['normal_image'].to(device)
             img_noise = input['abnormal_image'].to(device)
-            inputs = encoder(img)
-            inputs_noise = encoder(img_noise)
-
-            (feature_space_noise, feature_space) = proj_layer(inputs, features_noise = inputs_noise)
-
+            (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)   # forward pass
+            # calculate proj loss and total loss
             L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
-
-            outputs = decoder(bn(feature_space))
             L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
             loss.backward()
+
             if (i + 1) % accumulation_steps == 0:
-                optimizer_proj.step()
-                optimizer_distill.step()
+                model.optimizer_proj.step()
+                model.optimizer_distill.step()
                 # Clear gradients
-                optimizer_proj.zero_grad()
-                optimizer_distill.zero_grad()
+                model.optimizer_proj.zero_grad()
+                model.optimizer_distill.zero_grad()
             
             total_loss_sum += loss.detach().cpu().item()
             loss_proj_sum += L_proj.detach().cpu().item()
@@ -208,7 +116,7 @@ def train(params, train_loader, test_loader, device):
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
         # evaluate model
-        total_auroc, orchard_auroc_dict = evaluation_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
+        total_auroc, orchard_auroc_dict = evaluation_multi_proj(model, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
         auroc_dict[epoch+1] = orchard_auroc_dict
         print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
@@ -216,16 +124,14 @@ def train(params, train_loader, test_loader, device):
         if total_auroc > best_auroc:
             best_auroc = total_auroc
             best_epoch = epoch
-
-            torch.save({'proj': proj_layer.state_dict(),
-                       'decoder': decoder.state_dict(),
-                        'bn':bn.state_dict()}, params["model_path"])
+            print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
+            model.save_model(params["model_path"])
         
-        distill_scheduler.step()
-        proj_scheduler.step()
+        model.distill_scheduler.step(metrics=L_distill)
+        model.proj_scheduler.step(metrics=L_proj)
     
     # test best model after training and plot results
-    test_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+    test_multi_proj(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
                     feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
     plot_auroc(auroc_dict)
     return best_auroc, best_epoch
@@ -284,8 +190,9 @@ def objective(trial):
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
+    cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
     parser = ArgumentParser(description="")
-    parser.add_argument("--config", default="configs/contrast_config.yaml", required=False)
+    parser.add_argument("--config", default=os.path.join(cwd, "configs/contrast_config.yaml"), required=False)
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()
@@ -304,17 +211,11 @@ if __name__ == '__main__':
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")
-        train_loader, test_loader = get_loaders(params, test=True)
+        train_loader, test_loader = get_loaders_proj(params, test=True)
             
         # test
-        encoder, bn = wide_resnet50_2(pretrained=True, attention=params.get("bn_attention", False))
-        encoder = encoder.to(device)
-        bn = bn.to(device)
-        encoder.eval()
-        proj_layer =  MultiProjectionLayer(base=64).to(device)
-        decoder = de_wide_resnet50_2(pretrained=False)
-        decoder = decoder.to(device)
-        test_multi_proj(encoder, proj_layer, bn, decoder, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+        model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
+        test_multi_proj(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
                     feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]), n_plot_per_class=3)
         exit()
         
@@ -336,7 +237,7 @@ if __name__ == '__main__':
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")
-        train_loader, test_loader = get_loaders(params)
+        train_loader, test_loader = get_loaders_proj(params)
             
         # train
         best_auroc, best_epoch = train(params, train_loader, test_loader, device)

@@ -241,15 +241,12 @@ def test(model, data_loader, device, model_path, score_weight = 1.0, feature_wei
 
     print(f"[INFO] FINAL AVERAGE AUROC: {final_auroc / len(orchard_auroc_results)}")
 
-def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
+def evaluation_multi_proj(model, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
         Evaluate the model for multiple anomaly types
         Returns: average_auroc, orchard_auroc_dict
     """
-    encoder.eval()
-    proj.eval()
-    bn.eval()
-    decoder.eval()
+    model.eval()
 
     average_auroc = 0
     orchard_count = 0
@@ -270,9 +267,7 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
                 orchard_case_count[orchard_id] = {"normal": 0, "case_1": 0, "case_2": 0, "case_3": 0}
                 orchard_anomaly_scores[orchard_id] = {"normal": [0,0], "case_1": [0,0], "case_2": [0,0], "case_3": [0,0]}    # first for mean second for std dev of anomaly scores
 
-            inputs = encoder(img)
-            features = proj(inputs)
-            outputs = decoder(bn(features))
+            inputs, outputs = model(img)
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)
            
@@ -341,22 +336,13 @@ def evaluation_multi_proj(encoder, proj, bn, decoder, data_loader, device, log_p
     
     return average_auroc, orchard_auroc_dict
 
-def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path, score_weight = 1.0, feature_weights = [1.0, 1.0, 1.0], n_plot_per_class=0):
+def test_multi_proj(model, data_loader, device, model_path, score_weight = 1.0, feature_weights = [1.0, 1.0, 1.0], n_plot_per_class=0):
     """
         Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     # load the best model after training
-    ckp = torch.load(model_path, weights_only=True)
-    for k, v in list(ckp['bn'].items()):
-        if 'memory' in k:
-            ckp['bn'].pop(k)
-    decoder.load_state_dict(ckp['decoder'])
-    proj.load_state_dict(ckp['proj'])
-    bn.load_state_dict(ckp['bn'])
-    
-    bn.eval()
-    proj.eval()
-    decoder.eval()
+    model.load_model(model_path)
+    model.eval()
    
     # average auroc for each orchard
     orchard_patch_results = {}
@@ -378,9 +364,7 @@ def test_multi_proj(encoder, proj, bn, decoder, data_loader, device, model_path,
                 orchard_anomaly_scores[orchard_id] = {"normal": [0,0], "case_1": [0,0], "case_2": [0,0], "case_3": [0,0]}    # first for mean second for std dev of anomaly scores
                 plot_count[orchard_id] = {0: 0, 1: 0, 2: 0, 3: 0}
 
-            inputs = encoder(img)
-            features = proj(inputs)
-            outputs = decoder(bn(features))
+            inputs, outputs = model(img)
 
             anomaly_map, _ = cal_anomaly_map(inputs, outputs, img.shape[-1], amap_mode='a', weights=feature_weights)
             anomaly_map = gaussian_filter(anomaly_map, sigma=4)

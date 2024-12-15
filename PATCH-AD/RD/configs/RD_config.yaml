@@ -4,9 +4,7 @@ log_path: logs/RD_WEIGHTED_CBAM.txt
 resize_x: 256
 resize_y: 256
 channels: 3
-flip: 0.3
-crop_min: 0.9
-norm_choice: "IMAGE_NET"
+flip: 0.5
 
 #model_path: checkpoints/RD_WEIGHTED_CBAM.pth
 model_path: checkpoints/RD.pth
@@ -21,7 +19,7 @@ feature_weights: [1, 1, 1]
 score_weight: 0.0
 
 num_epochs: 100
-batch_size: 4
+batch_size: 64
 learning_rate: 0.005
 lr_factor: 0.333
 beta1: 0.9

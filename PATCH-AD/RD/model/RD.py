@@ -1,6 +1,6 @@
 import torch
-from torch.cuda.amp import autocast, GradScaler
-from model_utils import create_model, get_optimizer
+from torch.amp import autocast, GradScaler
+from model_utils.train_utils import get_optimizer, create_model
 
 class RD(torch.nn.Module):
     def __init__(self, architecture: str, bn_attention: bool, channels: int, device, params: dict):
@@ -14,8 +14,7 @@ class RD(torch.nn.Module):
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 
                                                                     mode='min', 
                                                                     factor=params["lr_factor"], 
-                                                                    patience=params.get("patience", 3), 
-                                                                    verbose=True)
+                                                                    patience=params.get("patience", 3))
         self.scaler = GradScaler("cuda")
         self.params = params
         self.device = device
@@ -41,7 +40,7 @@ class RD(torch.nn.Module):
         """
         SET THE MODEL TO TRAIN MODE
         """
-        self.encoder.train()
+        self.encoder.eval()
         self.decoder.train()
         self.bn.train()
 

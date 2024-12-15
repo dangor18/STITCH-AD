@@ -19,19 +19,12 @@ class CustomDataset(Dataset):
         data_path,
         transform_fn,
         resize_dim=None,
-        noise_factor=0,
-        p=0, 
-        norm_choice = "IMAGE_NET",
         channels = 3
     ):
         self.meta_file = meta_file
         self.data_path = data_path
         self.transform_fn = transform_fn
         self.resize_dim = resize_dim
-        self.noise_factor = noise_factor
-        self.p = p
-        self.norm_choice = norm_choice
-        self.i = 0
         self.channels = channels
         
         # construct metas
@@ -41,12 +34,7 @@ class CustomDataset(Dataset):
                 meta = json.loads(line)
                 self.metas.append(meta)
         
-        if self.norm_choice == "IMAGE_NET":
-            self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        #elif self.norm_choice == "PER_ORCHARD" and ("mean" in meta and "std" in meta):
-            #self.normalize = transforms.Normalize(mean=np.array(meta["mean"]), std=np.array(meta["std"]))
-        else:
-            self.normalize = None
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])    # imagenet norms
 
     def __len__(self):
         return len(self.metas)

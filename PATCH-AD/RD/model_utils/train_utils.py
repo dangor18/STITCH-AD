@@ -7,6 +7,9 @@ from torchvision import transforms
 from model.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
 from model.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
 from data.DL_RD import CustomDataset
+from data.DL_Contrast import train_dataset, test_dataset
+
+import os
 
 def get_loaders(params):
     """
@@ -15,15 +18,12 @@ def get_loaders(params):
     transform_fn = transforms.Compose([
                 transforms.RandomHorizontalFlip(p=params["flip"]),
                 transforms.RandomVerticalFlip(p=params["flip"]),
-    ])  
+    ])
     train_data = CustomDataset(
-        params["meta_path"] + "train_metadata.json", 
-        params["data_path"], 
-        transform_fn, 
-        (params["resize_x"], params["resize_y"]), 
-        noise_factor=0,
-        p=params["flip"],
-        norm_choice=params["norm_choice"],
+        meta_file=params["meta_path"] + "train_metadata.json", 
+        data_path=params["data_path"], 
+        transform_fn=transform_fn, 
+        resize_dim=(params["resize_x"], params["resize_y"]), 
         channels=params.get("channels", 3)
     )
     train_loader = DataLoader(
@@ -33,17 +33,43 @@ def get_loaders(params):
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,
-        prefetch_factor=2
     )
     test_data = CustomDataset(
-        params["meta_path"] + "test_metadata.json",
-        params["data_path"], 
-        None, 
-        (params["resize_x"], params["resize_y"]),
-        norm_choice=params["norm_choice"],
+        meta_file=params["meta_path"] + "test_metadata.json",
+        data_path=params["data_path"], 
+        transform_fn=None, 
+        resize_dim=(params["resize_x"], params["resize_y"]),
         channels=params.get("channels", 3)
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
+    
+    return train_loader, test_loader
+
+def get_loaders_proj(params, test=False):
+    """
+        Returns the train and test loader for the Revisiting RD model given the param config dict 
+    """
+    train_data = train_dataset(
+        meta_file=params["meta_path"] + "train_metadata.json", 
+        data_path=params["data_path"], 
+        transform_fn=True,
+        p_flip=params["flip"],
+        resize_dim=(params["resize_x"], params["resize_y"]), 
+    )
+    train_loader = DataLoader(
+        train_data, 
+        batch_size=params["batch_size"], 
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+    )
+    test_data = test_dataset(
+        meta_file=params["meta_path"] + "test_metadata.json",
+        data_path=params["data_path"], 
+        resize_dim=(params["resize_x"], params["resize_y"]),
+    )
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
     
     return train_loader, test_loader
 
@@ -69,6 +95,30 @@ def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = Tru
     else:
         raise ValueError(f"Unknown model architecture: {architecture}")
     return encoder, bn, decoder
+
+def create_model_proj(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
+    """
+    Return model corresponding to the specified architecture and whether to use attention or not in the bottleneck
+    """
+    proj_layer =  MultiProjectionLayer(base=64)
+    if architecture == "wide_resnet50_2":
+        encoder, bn = wide_resnet50_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_wide_resnet50_2(pretrained=False)
+    elif architecture == "resnet50":
+        encoder, bn = resnet50(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_resnet50(pretrained=False)
+    elif architecture == "resnet18":
+        encoder, bn = resnet18(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_resnet18(pretrained=False)
+    elif architecture == "wide_resnet101_2":
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_wide_resnet101_2(pretrained=False)
+    elif architecture == "asym":
+        encoder, bn = wide_resnet101_2(pretrained=True, attention=bn_attention, in_channels=in_channels)
+        decoder = de_wide_resnet50_2(pretrained=False)
+    else:
+        raise ValueError(f"Unknown model architecture: {architecture}")
+    return encoder, bn, decoder, proj_layer
 
 def get_optimizer(config, model_params = None):
     if str(config.get("optimizer", None)).upper() == "ADAM":

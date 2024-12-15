@@ -6,3 +6,4 @@ myenv
 *.json
 *.tif
 *.pth
+__pycache__

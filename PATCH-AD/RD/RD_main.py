@@ -13,7 +13,7 @@ import numpy as np
 
 from model_utils.test_utils import evaluation, test
 from model_utils.plots import plot_auroc
-from model_utils.train_utils import loss_function, get_loaders, get_optimizer, create_model
+from model_utils.train_utils import loss_function, get_loaders
 from model.RD import RD
 
 from tqdm import tqdm
@@ -34,53 +34,33 @@ def train_tuning(params, trial):
     Train with hyperparameter tuning (no logs, no model saves, no printing to console)
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train_loader, test_loader = get_loaders(params)
-    
-    encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    encoder.eval()
-    decoder = decoder.to(device)
-
-    optimizer = get_optimizer(params, list(decoder.parameters()) + list(bn.parameters()))
-    #loss_fn = get_loss_fn(params)
-    
-    # lr scheduler
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, 
-        step_size=params.get("step", 10),
-        gamma=params["lr_factor"],
-    )
-
-    scaler = GradScaler("cuda")
+    model = RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
 
     best_auroc = 0
     # train loop
     for epoch in range(params["num_epochs"]):
-        bn.train()
-        decoder.train()
+        model.train()
         
         for input in train_loader:
             images = input["image"].to(device)
             with autocast(device_type="cuda"):
-                inputs = encoder(images)
-                outputs = decoder(bn(inputs))
+                inputs, outputs = model(images)
                 loss = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
             
-            optimizer.zero_grad()
+            model.optimizer.zero_grad()
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            model.scaler.scale(loss).backward()
+            model.scaler.step(model.optimizer)
+            model.scaler.update()
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, _ = evaluation(encoder, bn, decoder, test_loader, device, score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"])
+            total_auroc, _ = evaluation(model, test_loader, device, score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"])
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
             
-            scheduler.step()
+            model.scheduler.step(metrics=total_auroc)
 
             # prune training if necessary (bad params)
             trial.report(total_auroc, epoch)
@@ -105,7 +85,7 @@ def train_normal(params, train_loader, test_loader, device):
         loss_sum = 0.0
         num_batches = 0
         
-        train_data = tqdm(train_loader)
+        train_data = tqdm(train_loader, desc=f"Learning Rate: {model.scheduler.get_last_lr()[0]:.5f}")
         
         for input in train_data:
             images = input["image"].to(device)
@@ -142,12 +122,12 @@ def train_normal(params, train_loader, test_loader, device):
                 best_auroc = total_auroc
                 # save model
                 print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
-                torch.save({'bn': bn.state_dict(), 'decoder': decoder.state_dict()}, params["model_path"])
+                model.save_model(params["model_path"])
             
-            model.scheduler.step()
+            model.scheduler.step(metrics=total_auroc)
     
     # after training load best model and get final metrics
-    test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
+    test(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
     plot_auroc(auroc_dict)
     return best_auroc
 
@@ -218,13 +198,9 @@ if __name__ == '__main__':
         # create data loaders
         print("[INFO] LOADING DATA...")
         train_loader, test_loader = get_loaders(params)
-        encoder, bn, decoder = create_model(architecture=params["architecture"], bn_attention=params["bn_attention"], in_channels=params.get("channels", 3))
-        encoder = encoder.to(device)
-        bn = bn.to(device)
-        encoder.eval()
-        decoder = decoder.to(device)
+        model = RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
         # test
-        test(encoder, bn, decoder, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
+        test(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
         exit()
         
     # tune with optuna or train with default parameters from config file
