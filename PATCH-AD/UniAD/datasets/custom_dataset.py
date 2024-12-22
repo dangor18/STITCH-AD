@@ -187,7 +187,10 @@ class CustomDataset(BaseDataset):
                 raise ValueError("Labels must be [None, 0, 1]!")
 
         # Scale image to lie between its min and max values
-        image = (image - image.min()) / (image.max() - image.min())
+        min_vals = np.array(meta["min_vals"]) 
+        max_vals = np.array(meta["max_vals"])
+        
+        image = (image - min_vals) / (max_vals - min_vals)
 
         # convert image to tensor and permute
         image = from_numpy(image).float()
