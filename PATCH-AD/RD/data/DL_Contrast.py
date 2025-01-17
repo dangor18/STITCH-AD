@@ -27,6 +27,7 @@ class train_dataset(Dataset):
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
         self.transform_fn = transform_fn
         self.p_flip = p_flip
         
@@ -52,7 +53,7 @@ class train_dataset(Dataset):
             axs[i].set_title(f'{channel_name} Channel', size=18)
             axs[i].axis('off')
             if i == 0:
-                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
             else:
                 plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
         plt.tight_layout()
@@ -141,6 +142,7 @@ class train_dataset(Dataset):
         # read image
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
         label = meta["label"]
+        case = meta["case"]
         image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -150,15 +152,23 @@ class train_dataset(Dataset):
         dem_min = np.percentile(dem, 5)
         dem_max = np.percentile(dem, 95)
         dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        red = image[:, :, 1]
+        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
+        reg = image[:, :, 2]
+        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
         grey = image[:, :, 1] / 255
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
 
         dem_na= dem[:, :, np.newaxis]
+        red_na = red[:, :, np.newaxis]
+        reg_na = reg[:, :, np.newaxis]
         sobel_dem_na = sobel_dem[:, :, np.newaxis]
         grey_na = grey[:, :, np.newaxis]
         normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
+        #normal_image = np.concatenate([dem_na, sobel_dem_na, red_na], axis=2)
         normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
+        #normal_image = torch.from_numpy(dem).float().unsqueeze(0)
         
         # randomly choose either case 1 or 2 psuedo-artefact
         choice = random.choice([1, 2])
@@ -170,11 +180,15 @@ class train_dataset(Dataset):
         sobel_noise = ndimage.sobel(dem_noise)
         sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
         dem_na = dem_noise[:, :, np.newaxis]
-        grey_na = grey[:, :, np.newaxis]
+        #grey_na = grey[:, :, np.newaxis]
+        red_na = red[:, :, np.newaxis]
+        reg_na = reg[:, :, np.newaxis]
         sobel_noise = sobel_noise[:, :, np.newaxis]
 
         img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
+        #img_noise = np.concatenate([dem_na, sobel_noise, red_na], axis=2)
         img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
+        #img_noise = torch.from_numpy(dem_noise).float().unsqueeze(0)    
         
         # apply flips
         if self.transform_fn:
@@ -189,6 +203,7 @@ class train_dataset(Dataset):
             {
                 "filename": filename,
                 "label": label,
+                "case": case,
                 "normal_image": normal_image,
                 "abnormal_image": img_noise,
             }
@@ -216,6 +231,7 @@ class test_dataset(Dataset):
         self.data_path = data_path
         self.resize_dim = resize_dim
         self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
 
         # construct metas
         with open(meta_file, "r") as f_r:
@@ -233,7 +249,7 @@ class test_dataset(Dataset):
         """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
+        for i, channel_name in enumerate(['DEM']):
             axs[i].set_xlabel('X', size=16)
             axs[i].set_ylabel('Y', size=16)
             axs[i].set_title(f'{channel_name} Channel', size=18)
@@ -252,6 +268,7 @@ class test_dataset(Dataset):
         # read image
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
         label = meta["label"]
+        case = meta["case"]
         image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -264,18 +281,27 @@ class test_dataset(Dataset):
         grey = rgb / 255
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+        red = image[:, :, 1]
+        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
+        reg = image[:, :, 2]
+        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
 
-        dem = dem[:, :, np.newaxis]
+        dem_na = dem[:, :, np.newaxis]
+        red = red[:, :, np.newaxis]
+        reg = reg[:, :, np.newaxis]
         sobel_dem = sobel_dem[:, :, np.newaxis]
+        #image = np.concatenate([dem, sobel_dem, red], axis=2)
         grey = grey[:, :, np.newaxis]
-        image = np.concatenate([dem, sobel_dem, grey], axis=2)
+        image = np.concatenate([dem_na, sobel_dem, grey], axis=2)
 
         image = torch.from_numpy(image).float().permute(2, 0, 1)
+        #image = torch.from_numpy(dem).float().unsqueeze(0)
 
         input.update(
             {
                 "filename": filename,
                 "label": label,
+                "case": case,
             }
         )
         if meta.get("clsname", None):

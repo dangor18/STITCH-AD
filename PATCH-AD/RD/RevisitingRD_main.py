@@ -6,7 +6,7 @@ from tqdm import tqdm
 import optuna
 from argparse import ArgumentParser
 import yaml
-from model_utils.test_utils import evaluation_multi_proj, test_multi_proj
+from model_utils.test_utils import evaluate_RD, test_RD
 from model_utils.train_utils import Revisit_RDLoss, loss_function, get_loaders_proj
 from model_utils.plots import plot_auroc
 
@@ -52,7 +52,7 @@ def train_tuning(params, trial):
                 model.optimizer_proj.zero_grad()
                 model.optimizer_distill.zero_grad()
         
-        total_auroc, _ = evaluation_multi_proj(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
+        total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
         if total_auroc > best_auroc:
             best_auroc = total_auroc
@@ -75,7 +75,7 @@ def train(params, train_loader, test_loader, device):
     
     auroc_dict = {}
     num_epoch = params.get("num_epochs", 100)
-    
+
     print("[INFO] TRAINING MODEL...")
     for epoch in range(1,num_epoch+1):
         model.train()
@@ -116,7 +116,7 @@ def train(params, train_loader, test_loader, device):
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
         # evaluate model
-        total_auroc, orchard_auroc_dict = evaluation_multi_proj(model, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
+        total_auroc, orchard_auroc_dict = evaluate_RD(model, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
         auroc_dict[epoch+1] = orchard_auroc_dict
         print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
@@ -127,11 +127,11 @@ def train(params, train_loader, test_loader, device):
             print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
             model.save_model(params["model_path"])
         
-        model.distill_scheduler.step(metrics=L_distill)
-        model.proj_scheduler.step(metrics=L_proj)
+        model.distill_scheduler.step(metrics=total_auroc)
+        model.proj_scheduler.step(metrics=total_auroc)
     
     # test best model after training and plot results
-    test_multi_proj(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+    test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
                     feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
     plot_auroc(auroc_dict)
     return best_auroc, best_epoch
@@ -215,7 +215,7 @@ if __name__ == '__main__':
             
         # test
         model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
-        test_multi_proj(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+        test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
                     feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]), n_plot_per_class=3)
         exit()
         

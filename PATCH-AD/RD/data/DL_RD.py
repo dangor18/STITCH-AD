@@ -64,6 +64,7 @@ class CustomDataset(Dataset):
         # read image
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
         label = meta["label"]
+        case = meta["case"]
         image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -86,6 +87,7 @@ class CustomDataset(Dataset):
             {
                 "filename": filename,
                 "label": label,
+                "case": case,
             }
         )
         if meta.get("clsname", None):

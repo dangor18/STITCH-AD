@@ -95,13 +95,13 @@ def plot_auroc(auroc_dict):
     plt.show()
 
 def get_class_name(label):
-    if label == 0:
+    if label == "normal":
         return "Normal"
-    elif label == 1:
+    elif label == "case_1":
         return "Case 1"
-    elif label == 2:
+    elif label == "case_2":
         return "Case 2"
-    elif label == 3:
+    elif label == "case_3":
         return "Case 3"
     else:
         return "Unknown"

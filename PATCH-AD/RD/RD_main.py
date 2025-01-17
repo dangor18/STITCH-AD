@@ -11,7 +11,7 @@ import torch.backends.cudnn as cudnn
 from torch.amp import autocast, GradScaler
 import numpy as np
 
-from model_utils.test_utils import evaluation, test
+from model_utils.test_utils import evaluate_RD, test_RD
 from model_utils.plots import plot_auroc
 from model_utils.train_utils import loss_function, get_loaders
 from model.RD import RD
@@ -55,7 +55,7 @@ def train_tuning(params, trial):
         
         # evaluate every 10 epochs
         if (epoch + 1) % 2 == 0 and epoch + 1 > 3:
-            total_auroc, _ = evaluation(model, test_loader, device, score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"])
+            total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"])
             
             if total_auroc > best_auroc:
                 best_auroc = total_auroc
@@ -110,7 +110,7 @@ def train_normal(params, train_loader, test_loader, device):
         
         # evaluate every 1 epoch
         if (epoch + 1) % 1 == 0:
-            total_auroc, orchard_auroc_dict = evaluation(model, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
+            total_auroc, orchard_auroc_dict = evaluate_RD(model, test_loader, device, params["log_path"], feature_weights=params["feature_weights"],
                                                          score_weight=params.get("score_weight", 0.0))
             
             # collect aurocs for each orchard and total for plotting
@@ -127,7 +127,7 @@ def train_normal(params, train_loader, test_loader, device):
             model.scheduler.step(metrics=total_auroc)
     
     # after training load best model and get final metrics
-    test(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
+    test_RD(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
     plot_auroc(auroc_dict)
     return best_auroc
 
@@ -200,7 +200,7 @@ if __name__ == '__main__':
         train_loader, test_loader = get_loaders(params)
         model = RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
         # test
-        test(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
+        test_RD(model, test_loader, device, params["model_path"], score_weight=params.get("score_weight", 0.0), feature_weights=params["feature_weights"], n_plot_per_class=0)
         exit()
         
     # tune with optuna or train with default parameters from config file

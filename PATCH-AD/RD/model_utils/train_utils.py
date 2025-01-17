@@ -213,6 +213,7 @@ class CosineReconstruct(nn.Module):
     def forward(self, x, y):
         return torch.mean(1 - torch.nn.CosineSimilarity()(x, y))
 
+'''
 class Revisit_RDLoss(nn.Module):
     """
     receive multiple inputs feature
@@ -221,9 +222,9 @@ class Revisit_RDLoss(nn.Module):
     def __init__(self, reconstruct_weight, contrast_weight, ssot_weight, consistent_shuffle = True):
         super(Revisit_RDLoss, self).__init__()
         self.sinkhorn = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=0.05, \
-                              reach=None, diameter=10000000, scaling=0.95, \
-                                truncate=10, cost=None, kernel=None, cluster_scale=None, \
-                                  debias=True, potentials=False, verbose=False, backend='auto')
+                              reach=None, diameter=10000000, scaling=0.9, \
+                                truncate=5, cost=None, kernel=None, cluster_scale=None, \
+                                  debias=True, potentials=False, verbose=False, backend='tensorized')
         self.reconstruct = CosineReconstruct()       
         self.contrast = torch.nn.CosineEmbeddingLoss(margin = 0.5)
         self.ssot_weight = ssot_weight
@@ -244,7 +245,7 @@ class Revisit_RDLoss(nn.Module):
         normal_proj2 = projected_normal_feature[1]
         normal_proj3 = projected_normal_feature[2]
         # shuffling samples order for caculating pair-wise loss_ssot in batch-mode , (for efficient computation)
-        shuffle_index = torch.randperm(current_batchsize)
+        shuffle_index = torch.randperm(current_batchsize, device=normal_proj1.device)
         # Shuffle the feature order of samples in each block
         shuffle_1 = normal_proj1[shuffle_index]
         shuffle_2 = normal_proj2[shuffle_index]
@@ -262,3 +263,73 @@ class Revisit_RDLoss(nn.Module):
                            self.contrast(noised_feature2.view(noised_feature2.shape[0], -1), normal_proj2.view(normal_proj2.shape[0], -1), target = target) +\
                            self.contrast(noised_feature3.view(noised_feature3.shape[0], -1), normal_proj3.view(normal_proj3.shape[0], -1), target = target)
         return (self.ssot_weight * loss_ssot + self.reconstruct_weight * loss_reconstruct + self.contrast_weight * loss_contrast)/1.11
+'''
+class Revisit_RDLoss(nn.Module):
+    def __init__(self, reconstruct_weight, contrast_weight, ssot_weight, consistent_shuffle=True):
+        super(Revisit_RDLoss, self).__init__()
+
+        self.sinkhorn = geomloss.SamplesLoss(
+            loss='sinkhorn',
+            p=2,
+            blur=0.05,
+            diameter=None,      # set to None for increased performance
+            scaling=0.9,        # decreased from original (0.95) to 0.9 for performance
+            backend='tensorized',   # set to 'tensorized' as opposed to 'auto' for 'better gpu utilization'
+            truncate=5, 
+            debias=True
+        )
+        self.reconstruct = CosineReconstruct()
+        self.contrast = torch.nn.CosineEmbeddingLoss(margin=0.5)
+        self.ssot_weight = ssot_weight
+        self.reconstruct_weight = reconstruct_weight
+        self.contrast_weight = contrast_weight
+
+    def forward(self, noised_feature, projected_noised_feature, projected_normal_feature):
+        current_batchsize = projected_normal_feature[0].shape[0]
+        
+        target = -torch.ones(current_batchsize, device=projected_normal_feature[0].device)
+        
+        # pre compute softmax once for each feature
+        normal_proj1 = torch.softmax(projected_normal_feature[0].view(current_batchsize, -1), -1)
+        normal_proj2 = torch.softmax(projected_normal_feature[1].view(current_batchsize, -1), -1)
+        normal_proj3 = torch.softmax(projected_normal_feature[2].view(current_batchsize, -1), -1)
+
+        shuffle_index = torch.randperm(current_batchsize, device=normal_proj1.device)
+        
+        shuffle_1 = normal_proj1[shuffle_index]
+        shuffle_2 = normal_proj2[shuffle_index]
+        shuffle_3 = normal_proj3[shuffle_index]
+
+        abnormal_proj1, abnormal_proj2, abnormal_proj3 = projected_noised_feature
+        noised_feature1, noised_feature2, noised_feature3 = noised_feature
+
+        loss_ssot = (
+            self.sinkhorn(normal_proj1, shuffle_1) +
+            self.sinkhorn(normal_proj2, shuffle_2) +
+            self.sinkhorn(normal_proj3, shuffle_3)
+        )
+
+        loss_reconstruct = (
+            self.reconstruct(abnormal_proj1, projected_normal_feature[0]) +
+            self.reconstruct(abnormal_proj2, projected_normal_feature[1]) +
+            self.reconstruct(abnormal_proj3, projected_normal_feature[2])
+        )
+
+        # pre flatten tensors for contrast loss
+        nf1_flat = noised_feature1.view(noised_feature1.shape[0], -1)
+        nf2_flat = noised_feature2.view(noised_feature2.shape[0], -1)
+        nf3_flat = noised_feature3.view(noised_feature3.shape[0], -1)
+        
+        pnf1_flat = projected_normal_feature[0].view(projected_normal_feature[0].shape[0], -1)
+        pnf2_flat = projected_normal_feature[1].view(projected_normal_feature[1].shape[0], -1)
+        pnf3_flat = projected_normal_feature[2].view(projected_normal_feature[2].shape[0], -1)
+
+        loss_contrast = (
+            self.contrast(nf1_flat, pnf1_flat, target) +
+            self.contrast(nf2_flat, pnf2_flat, target) +
+            self.contrast(nf3_flat, pnf3_flat, target)
+        )
+
+        return (self.ssot_weight * loss_ssot + 
+                self.reconstruct_weight * loss_reconstruct + 
+                self.contrast_weight * loss_contrast) / 1.11

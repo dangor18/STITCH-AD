@@ -54,7 +54,7 @@ class RevistingRD(torch.nn.Module):
             if 'memory' in k:
                 ckp['bn'].pop(k)
         self.decoder.load_state_dict(ckp['decoder'])
-        self.proj.load_state_dict(ckp['proj'])
+        self.proj_layer.load_state_dict(ckp['proj'])
         self.bn.load_state_dict(ckp['bn'])
 
     def train(self):
