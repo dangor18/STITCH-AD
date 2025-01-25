@@ -157,13 +157,13 @@ def main():
                 anomaly_threshold = config["anomaly_threshold"]
                 scale_ratio = config["scale_ratio"]
                     
-                reference_file = config["reference"]
+                reference_file = os.path.join(path, config["reference"])
                 # get width and height of RGB file for orchard and times each by scale factor (new height and width of each channel for this particular orchard)
-                rgb_path = os.path.join(path, "orthos", "export-data", "orthomosaic_visible.tif")
-                if os.path.exists(rgb_path):
-                    width, height = getTIFDimensions(rgb_path)
-                else:
+                if os.path.exists(reference_file):
                     width, height = getTIFDimensions(reference_file)
+                else:
+                    rgb_path = os.path.join(path, "orthos", "export-data", "orthomosaic_visible.tif")
+                    width, height = getTIFDimensions(rgb_path)
 
                 scale_width = int(scale_ratio * width)
                 scale_height = int(scale_ratio * height)
@@ -171,7 +171,7 @@ def main():
                 if verbose:
                     print(f"Scaling every channel to: {scale_width}x{scale_height}")
                     
-                mask_file = config["mask"]
+                mask_file = os.path.join(path, config["mask"])
                 output_dir = os.path.join(cwd, config["output_path"])
 
             except KeyError as e:
