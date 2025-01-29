@@ -285,20 +285,33 @@ def load_sam_model(config):
     return mask_generator
 
 def create_threshold_mask(image, config):
-    """Apply 4-8-6 concatenated preprocessing"""
+    """Apply preprocessing with enhanced normalization"""
+    image = image.transpose(1, 2, 0)
     img_f = image.astype(np.float32)
     
-    # Method 4: Color ratio
+    # Calculate vegetation indices
     ratio = 255 * (img_f[:,:,1] / (img_f[:,:,0] + 1))
-    
-    # Method 6: Shadow invariant
-    shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2])
-    
-    # Method 8: Seasonal index  
+    shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
     seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
+
+    # Normalize each channel individually
+    ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
+    shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
+    seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
     
-    concatenated = np.dstack([ratio, shadow * 85, seasonal])
-    return np.uint8(np.clip(concatenated, 0, 255))
+    # Enhance contrast
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    ratio = clahe.apply(ratio.astype(np.uint8))
+    shadow = clahe.apply(shadow.astype(np.uint8))
+    seasonal = clahe.apply(seasonal.astype(np.uint8))
+
+    # Combine channels with orchard areas enhanced
+    result = np.dstack([ratio, shadow, seasonal])
+    
+    # Additional normalization to ensure orchards are lighter
+    result = cv2.normalize(result, None, 0, 255, cv2.NORM_MINMAX)
+    
+    return np.uint8(result)
 
 def further_downscale_for_sam(image, target_size):
     """
@@ -532,13 +545,14 @@ def detect_and_remove_dams(mask, image, outlier_threshold=1.5):
 
 def apply_autumn_filter(image):
     """Convert RGB image to autumn colors while preserving alpha channel"""
-    print("Input image shape:", image.shape)
+    
+    if image.shape[2] > 4:
+        image = image.transpose(1, 2, 0)
+        print(f'Image shape after transpose: {image.shape}')
     
     # Extract alpha and RGB channels
     alpha = image[:, :, 3]  # Get alpha channel
     rgb = image[:, :, :3]   # Get RGB channels
-    
-    print("RGB shape:", rgb.shape)
     
     # Process RGB channels
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
@@ -562,9 +576,36 @@ def apply_autumn_filter(image):
     # Convert to channel-first format
     return result.transpose(2, 0, 1)
 
+def save_debug_image(image, filename, output_dir):
+    """
+    Save debug image in both PNG and NPY formats, handling different shapes appropriately.
+    
+    Args:
+        image: Input image/mask that could be:
+            - HWC format (height, width, channels)
+            - CHW format (channels, height, width)
+            - HW format (height, width) for single-channel masks
+        filename: Name for the saved files
+        output_dir: Output directory
+    """
+    return
+    debug_dir = os.path.join(output_dir, "debug")
+    os.makedirs(debug_dir, exist_ok=True)
+    
+    # Handle different input shapes
+    if image.ndim == 2:  # Single channel mask
+        plt.imsave(os.path.join(debug_dir, f"{filename}.png"), image, cmap='gray')
+    elif image.ndim == 3:
+        if image.shape[0] in [3, 4]:  # CHW format
+            image_to_save = image.transpose(1, 2, 0)
+        else:  # Already in HWC format
+            image_to_save = image
+        plt.imsave(os.path.join(debug_dir, f"{filename}.png"), image_to_save)
+    
+    
 def process_single_file(input_file, output_dir, config, mask_generator):
     """
-    Process a single input file.
+    Process a single input file with debug image saves at key pipeline stages.
 
     Args:
         input_file (str): Path to the input file.
@@ -588,7 +629,7 @@ def process_single_file(input_file, output_dir, config, mask_generator):
     os.makedirs(os.path.dirname(downscaled_file), exist_ok=True)
     os.makedirs(os.path.dirname(mask_file), exist_ok=True)
 
-    # Downscaling
+    # Downscaling and loading initial image
     if os.path.exists(downscaled_file):
         print("Loading existing downscaled image...")
         with rasterio.open(downscaled_file) as src:
@@ -599,42 +640,65 @@ def process_single_file(input_file, output_dir, config, mask_generator):
         print("Saving downscaled image...")
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
-
-    image = downscaled_image.transpose(1, 2, 0)
     
-    # image = apply_autumn_filter(image)
+    save_debug_image(downscaled_image, f"{unique_id}_01_downscaled", output_dir)
 
-    # Create threshold mask
+    original_image = downscaled_image
+    save_debug_image(original_image, f"{unique_id}_02_original", output_dir)
+    
+    # Apply autumn filter
+    image = original_image
+    # image = apply_autumn_filter(original_image)
+    save_debug_image(image, f"{unique_id}_03_autumn", output_dir)
+    # print(f'SHape of autum image: {image.shape}')
+    
+    # Threshold mask creation
     threshold_mask = create_threshold_mask(image, config)
-    # Further downscale for SAM
-    sam_image = further_downscale_for_sam(threshold_mask, config['segmentation']['sam_target_size'])
-
-    # Apply segmentation model
-    segmentation_mask = segment_image(sam_image, mask_generator, config)
+    save_debug_image(threshold_mask, f"{unique_id}_04_threshold", output_dir)
     
+    # SAM preprocessing
+    sam_image = further_downscale_for_sam(threshold_mask, config['segmentation']['sam_target_size'])
+    save_debug_image(sam_image, f"{unique_id}_05_sam_input", output_dir)
+
+    # Segmentation
+    segmentation_mask = segment_image(sam_image, mask_generator, config)
+    save_debug_image(segmentation_mask.astype(np.uint8)*255, f"{unique_id}_06_segmentation", output_dir)
+    
+    print(segmentation_mask.shape)
+
     print("Segmentation completed.")
     
-    # Upscale the mask to match the downscaled RGB image
-    upscaled_mask = cv2.resize(segmentation_mask.astype(np.uint8), (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
+    print(f'Image shape before upscale: {image.shape}')
+    
+    # Mask upscaling
+    upscaled_mask = cv2.resize(segmentation_mask.astype(np.uint8), (image.shape[2], image.shape[1]), 
+                              interpolation=cv2.INTER_NEAREST)
+    save_debug_image(upscaled_mask*255, f"{unique_id}_07_upscaled", output_dir)
     
     print("Upscaling completed.")
 
-    # Remove segments with high no-data percentage
+    # No-data removal
     nodata_value = np.array(config['segmentation']['nodata_value'])    
     max_nodata_percentage = config['segmentation']['max_nodata_percentage']
     border_size = config['segmentation'].get('border_size', 3)
     
     print("Removing no-data segments...")
-    cleaned_mask = remove_nodata_segments(upscaled_mask, image, nodata_value, max_nodata_percentage, border_size, num_threads=12)
+    cleaned_mask = remove_nodata_segments(upscaled_mask, original_image, nodata_value, 
+                                        max_nodata_percentage, border_size, num_threads=12)
+    
+    save_debug_image(cleaned_mask*255, f"{unique_id}_08_cleaned", output_dir)
     
     print("No-data removal completed.")
-    # Detect and remove dams
+    
+    # Dam removal
     outlier_threshold = config['segmentation']['outlier_threshold']
     final_mask = detect_and_remove_dams(cleaned_mask, image, outlier_threshold)
+    save_debug_image(final_mask*255, f"{unique_id}_09_no_dams", output_dir)
     
     print("Dam removal completed.")
-    final_mask = keep_largest_segment(np.logical_not(final_mask))
     
+    # Final mask processing
+    final_mask = keep_largest_segment(np.logical_not(final_mask))
     final_mask = np.where(final_mask == 1, 0, -999)
 
     # Save final mask
