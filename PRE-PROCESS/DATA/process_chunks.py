@@ -41,10 +41,10 @@ def train_test_split(folder_path: str):
                 print(f"{case} contains {npy_count} .npy files")
     
     if case_counts:
-        avg_count = sum(case_counts) // len(case_counts)
-        print(f"Average .npy count: {avg_count}")
+        sum_count = sum(case_counts)
+        print(f"Average .npy count: {sum_count}")
         normal_files = [f for f in os.listdir(os.path.join(folder_path, 'train', 'normal')) if f.endswith('.npy')]
-        files_to_move = random.sample(normal_files, min(avg_count, len(normal_files)//4))
+        files_to_move = random.sample(normal_files, min(sum_count, len(normal_files)//4))
         
         for file in files_to_move:
             shutil.move(os.path.join(folder_path, 'train', 'normal', file), 
@@ -55,14 +55,17 @@ def train_test_split(folder_path: str):
         print("No non-empty case folders found. No files moved to test/normal.")
 
 def main(root_dir: str):
+    print(f"Root directory: {root_dir}")
     orchards = [orchard for orchard in os.listdir(root_dir) 
                 if os.path.isdir(os.path.join(root_dir, orchard)) and 
                 is_orchard_folder(os.path.join(root_dir, orchard))]
+    print(f"Orchards found: {orchards}")
     
     # split each orchards data (given the orchards data directory is present in the root directory)
     for orchard in orchards:
         orchard_path = os.path.join(root_dir, orchard)
         # split the data into a train and test set
+        print(f"Splitting data for: {orchard_path}")
         train_test_split(orchard_path)
 
 if __name__ == "__main__":
