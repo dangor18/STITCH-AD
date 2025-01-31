@@ -1,0 +1,7 @@
+.venv
+dataset
+checkpoints
+ckpt
+__pycache__
+
+*.pdf

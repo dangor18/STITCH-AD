@@ -1,22 +1,27 @@
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from model_utils.test_utils import cal_anomaly_map, gaussian_filter
-from model.resnet import wide_resnet50_2
-from model_utils.train_utils import MultiProjectionLayer
-from model.de_resnet import de_wide_resnet50_2
+  
+# RD model imports
+from PATCH_AD.RD.model import RevisitingRD, RD
+from PATCH_AD.RD.model_utils.test_utils import cal_anomaly_map as anomaly_score_RD
+from PATCH_AD.RD.model_utils.train_utils import get_loaders as get_loaders_RD
+# UniAD model imports
+from PATCH_AD.UniAD.datasets import custom_dataset as UniAD_dataset # TODO
+# SCADN model imports
+from PATCH_AD.SCADN.src import custom_dataset as SCADN_dataset
 from argparse import ArgumentParser
 import yaml
 from sklearn.ensemble import IsolationForest
 from hdbscan import HDBSCAN
 from sklearn.metrics import ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
-from data.DL_inference import inference_dataset
 import time
 from tqdm import tqdm
 import json
 import optuna
 from sklearn.preprocessing import StandardScaler
+from collections import defaultdict
 
 gt_dict = {
     "1676": -1,
@@ -38,47 +43,21 @@ def load_model(params, device):
             params: dictionary containing parameters for the model
             device: device to run the model on
     """
-    encoder, bn = wide_resnet50_2(pretrained=True, attention=params["bn_attention"], in_channels=params["channels"])
-    encoder = encoder.to(device)
-    bn = bn.to(device)
-    decoder = de_wide_resnet50_2(pretrained=False).to(device)
     if params["model_type"] == "RD":
-        ckp = torch.load(params["model_path"], weights_only=True)
-        for k, v in list(ckp['bn'].items()):
-            if 'memory' in k:
-                ckp['bn'].pop(k)
-        decoder.load_state_dict(ckp['decoder'])
-        bn.load_state_dict(ckp['bn'])
-
-        encoder.eval()
-        bn.eval()
-        decoder.eval()
-        
-        return encoder, bn, decoder
-    
-    elif params["model_type"] == "RDProj":
-        proj_layer = MultiProjectionLayer(base=64).to(device)
-        ckp = torch.load(params["model_path"], weights_only=True)
-        for k, v in list(ckp['bn'].items()):
-            if 'memory' in k:
-                ckp['bn'].pop(k)
-        decoder.load_state_dict(ckp['decoder'])
-        bn.load_state_dict(ckp['bn'])
-        proj_layer.load_state_dict(ckp['proj'])
-            
-        encoder.eval()
-        bn.eval()
-        decoder.eval()
-        proj_layer.eval()
-
-        return encoder, bn, decoder, proj_layer
+        return RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
+    elif params["model_type"] == "RevisitingRD":
+        return RevisitingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
+    elif params["model_type"] == "UniAD":   # TODO
+        return None
+    elif params["model_type"] == "SCADN":
+        return None
     else:
         print("[ERROR] UNKOWN MODEL")
         return None
 
-def get_scores_loc(params, data_loader, device):
+def get_scores(params, data_loader, device):
     """
-        Return anomaly scores, location, and gt label for patches for each orchard
+        Return anomaly scores, location, and gt label for patches for each orchard in a dictionary
         ARGS:
             params: dictionary containing parameters for the model
             data_loader
@@ -86,45 +65,37 @@ def get_scores_loc(params, data_loader, device):
     """
     start_time = time.time()
     print("GETTING PATCH DATA...")
-    score_dict = {}
-    if params["model_type"] == "RD":
-        encoder, bn, decoder = load_model(params, device)
-    else:
-        encoder, bn, decoder, proj_layer = load_model(params, device)
-    
-    for input in tqdm(data_loader):
-        patch = input['image'].to(device)
-        x, y = input['x'].item(), input['y'].item() # get x y location for patch from DL
-        lbl = input['label'].item()
-        if lbl in [1, 2, 3]:    # convert gt labels to binary labels
-            lbl = -1
-        elif lbl == 0:
-            lbl = 1
-        orchard_id = input['clsname'][0]
-        
-        if orchard_id not in score_dict:
-            score_dict[orchard_id] = []
+    score_dict = defaultdict(lambda: [])
+    # get the model
+    model = load_model(params, device)
+    # get corresponding anomaly score function
+    scorer = anomaly_score_RD if params["model_type"] == "RD" else None #TODO
 
-        with torch.no_grad():
-            if params["model_type"] == "RD":    # get score from model and add to list
-                inputs = encoder(patch)
-                outputs = decoder(bn(inputs))
-            elif params["model_type"] == "RDProj":
-                inputs = encoder(patch)
-                features = proj_layer(inputs)
-                outputs = decoder(bn(features))
-        anomaly_map, _ = cal_anomaly_map(inputs, outputs, patch.shape[-1], amap_mode='a', weights=params["feature_weights"])
-        anomaly_map = gaussian_filter(anomaly_map, sigma=4)
-        score = np.max(anomaly_map) + params.get("score_weight", 0) * np.average(anomaly_map)
-        
-        score_dict[orchard_id].append([x, y, score, lbl])
+    model.eval()
+    with torch.no_grad():    
+        for input in tqdm(data_loader):
+            cls_name, lbl = input["clsname"][0].split('_')[0], input["label"][0]   # cls_name either "all" or orchard id
+            # libraries used prefer -1 for anomalous and 1 for normal
+            if cls_name == "all":
+                continue
+            if lbl == 0:
+                lbl = -1
+
+            patch = input['image'].to(device)
+            x, y = input['x'].item(), input['y'].item()     # get x y location for patch from DL
+            inputs, outputs = model(patch)    # get the input and output from the model
+
+            score = scorer(inputs, outputs)    # get the anomaly score for the patch
+            # TODO possibly need to wrap this in a bettter function for all the models to work
+            
+            score_dict[cls_name].append([x, y, score, lbl])
 
     end_time = time.time()
     run_time = end_time - start_time
     print("TIME (s):", run_time)
     # write dict to file (only used for the demo)
-    with open(f"data/{params['model_type']}_score_dict.json", "w") as f:
-        json.dump(score_dict, f)
+    #with open(f"data/{params['model_type']}_score_dict.json", "w") as f:
+    #    json.dump(score_dict, f)
 
     return score_dict
 
@@ -132,14 +103,8 @@ def get_loaders(params):
     """
         Return the dataloader for inference
     """
-    dataset = inference_dataset(
-        params["meta_path"] + "train_metadata.json", 
-        params["meta_path"] + "test_metadata.json",
-        params["data_path"], 
-        (params["resize_x"], params["resize_y"]), 
-    )
-
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4, pin_memory=True)
+    if params["model_type"] == "RD" or params["model_type"] == "RevisitingRD":
+        data_loader = get_loaders_RD(params)
     
     return data_loader
 
@@ -422,6 +387,7 @@ if __name__ == "__main__":
     with open(args.config, "r") as f:
         params = yaml.safe_load(f)
 
+    # tune the orchard level models WIP
     if args.tune:
         study = optuna.create_study(direction="maximize")
         study.optimize(objective, n_trials=1500)
@@ -431,12 +397,14 @@ if __name__ == "__main__":
     else:
         pred_list = {-1: "Anomalous", 1: "Normal"}
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        #plot_score_grid(get_scores_loc(params, get_loaders(params), device))
+        
+        # load the json file and skip the DL model inference part WIP
         if args.test:
             with open(f"data/{params['model_type']}_score_dict.json", "r") as f:
                 score_dict = json.load(f)
         else:
-            score_dict = get_scores_loc(params, get_loaders(params), device)
+            # start here
+            score_dict = get_scores(params, get_loaders(params), device)
 
         pr_dict, normal_cm, anomalous_cm = infer_iso_forest(params, score_dict)
         print("===================== ISOLATION FOREST =====================")

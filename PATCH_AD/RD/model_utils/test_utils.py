@@ -16,7 +16,7 @@ from sklearn.metrics import PrecisionRecallDisplay
 
 from collections import defaultdict
 
-def cal_anomaly_map(fs_list, ft_list, out_size=224, amap_mode='mul', weights=[1.0, 1.0, 1.0]):
+def cal_anomaly_map(fs_list, ft_list, out_size=256, amap_mode='mul', weights=[1.0, 1.0, 1.0]):
     """
         calculate anomaly map by comparing feature maps from encoder and decoder. 
         amap_mode is either 'mul' or 'add' indicating whether to multiply or add the anomaly maps from each layer

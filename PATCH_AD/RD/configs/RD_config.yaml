@@ -1,5 +1,5 @@
-data_path: PRE-PROCESS/DATA/PATCHES/DRGB_80/
-meta_path: PRE-PROCESS/DATA/PATCHES/DRGB_80/metadata/
+data_path: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/
+meta_path: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/metadata/
 log_path: logs/RD_WEIGHTED_CBAM.txt
 resize_x: 256
 resize_y: 256
