@@ -43,7 +43,7 @@ def cal_anomaly_map(fs_list, ft_list, out_size=256, amap_mode='mul', weights=[1.
             anomaly_map += a_map
     return anomaly_map, a_map_list
 
-def cal_anomaly_score(inputs, outputs, score_weight, out_size=256, feature_weights=[1.0, 1.0, 1.0]):
+def cal_anomaly_score(inputs, outputs, score_weight=0, out_size=256, feature_weights=[1.0, 1.0, 1.0]):
     anomaly_map, _ = cal_anomaly_map(inputs, outputs, out_size, amap_mode='a', weights=feature_weights)
     anomaly_map = gaussian_filter(anomaly_map, sigma=4)
     anomaly_score = np.max(anomaly_map) + score_weight * np.average(anomaly_map)
@@ -51,7 +51,15 @@ def cal_anomaly_score(inputs, outputs, score_weight, out_size=256, feature_weigh
     return anomaly_score
 
 def get_orchard_stats(orchard_data):
+    auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_1"]))], 
+                                      orchard_data["pr_normal"] + orchard_data["pr_case_1"])
+    auroc_case2 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_2"]))], 
+                                      orchard_data["pr_normal"] + orchard_data["pr_case_2"])
+    auroc_case3 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_3"]))], 
+                                      orchard_data["pr_normal"] + orchard_data["pr_case_3"])
+    
     stat_dict = defaultdict(lambda: [0, 0])  # mean and std dev for each case and normal
+    
     stat_dict["normal"][0] = round(sum(orchard_data["pr_normal"]) / len(orchard_data["pr_normal"]), 5)
     stat_dict["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
     stat_dict["case_2"][0] = round(sum(orchard_data["pr_case_2"]) / len(orchard_data["pr_case_2"]), 5) if not len(orchard_data["pr_case_2"]) == 0 else None
@@ -60,13 +68,6 @@ def get_orchard_stats(orchard_data):
     stat_dict["case_1"][1] = round(np.std(orchard_data["pr_case_1"]), 5) if not len(orchard_data["pr_case_1"]) == 0 else None
     stat_dict["case_3"][0] = round(sum(orchard_data["pr_case_3"]) / len(orchard_data["pr_case_3"]), 5) if not len(orchard_data["pr_case_3"]) == 0 else None
     stat_dict["case_3"][1] = round(np.std(orchard_data["pr_case_3"]), 5) if not len(orchard_data["pr_case_3"]) == 0 else None
-
-    auroc_case1 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_1"]))], 
-                                      orchard_data["pr_normal"] + orchard_data["pr_case_1"])
-    auroc_case2 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_2"]))], 
-                                      orchard_data["pr_normal"] + orchard_data["pr_case_2"])
-    auroc_case3 = calculate_auroc([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_3"]))], 
-                                      orchard_data["pr_normal"] + orchard_data["pr_case_3"])
 
     return stat_dict, auroc_case1, auroc_case2, auroc_case3
 
@@ -100,7 +101,7 @@ def evaluate_RD(model, data_loader, device, log_path = None, score_weight = 1.0,
             img = input["image"].to(device)
             #img = img.squeeze(-1)
             #label = input["label"].item()   # 0 for normal, 1 for artefact
-            cls_name, case_id = input["clsname"][0].split('_')[0], input["case"][0]   # cls_name either "all" or orchard id
+            cls_name, case_id = input["clsname"][0], input["case"][0]   # cls_name either "all" or orchard id
             #print(f"[INFO] CLASS NAME: {cls_name}, CASE NUM: {case_id}")
 
             inputs, outputs = model(img)
@@ -114,17 +115,14 @@ def evaluate_RD(model, data_loader, device, log_path = None, score_weight = 1.0,
     
     for orchard_id, orchard_data in orchard_anomaly_score_dict.items():
         # get stats for each case
-        orchard_score_stats, auroc_case1, auroc_case2, auroc_case3  = get_orchard_stats(orchard_data)
+        orchard_score_stats, auroc_case  = get_orchard_stats(orchard_data)
 
-        auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
-        orchard_auroc_dict[orchard_id] = auroc_total * 100
+        #auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
+        #orchard_auroc_dict[orchard_id] = auroc_total * 100
         
         if log_path:
             with open(log_path, "a") as file:
-                if orchard_id == "all":
-                    file.write(f"\n-- ALL CASES: CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
-                else:
-                    file.write(f"\n-- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
+                    file.write(f"\n-- {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
                     file.write(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} STD DEV: {orchard_score_stats['normal'][1]}"+
                            f"\n++ CASE 1 MEAN: {orchard_score_stats['case_1'][0]} STD DEV: {orchard_score_stats['case_1'][1]}" +
                            f"\n++ CASE 2 MEAN: {orchard_score_stats['case_2'][0]} STD DEV: {orchard_score_stats['case_2'][1]}" +

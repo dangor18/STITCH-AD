@@ -81,12 +81,14 @@ def process_directory(dir_path, class_name, split, orchard_name, min_vals, max_v
                "clsname": orchard_name,
                "min_vals": min_vals,
                "max_vals": max_vals,
-               "case": class_name
+               "case": class_name,
+               "x": int(os.path.splitext(os.path.basename(filename))[0].split("_")[-1]),
+               "y": int(os.path.splitext(os.path.basename(filename))[0].split("_")[-2])
            }
            metadata.append(metadata_entry)
    return metadata
 
-def main(root_dir, verbose, totals):
+def main(root_dir, verbose, totals, orchard_level):
    """
    Main function to generate metadata for the orchard dataset.
 
@@ -187,6 +189,18 @@ def main(root_dir, verbose, totals):
    if not os.path.exists(metadata_dir):
        os.makedirs(metadata_dir)
 
+   if orchard_level:
+    all_metadata_unique = generate_all_metadata(ordered_test_metadata, all_metadata)
+
+    # Save the all unique metadata to a JSON file
+    all_output_file = os.path.join(metadata_dir, "all_metadata.json")  # New output file
+    with open(all_output_file, "w") as f:
+            for entry in all_metadata_unique:
+                json.dump(entry, f)
+                f.write("\n")
+
+    print(f"All metadata file '{all_output_file}' has been generated successfully.")
+    
    # Save the training metadata to a JSON file
    train_output_file = os.path.join(metadata_dir, "train_metadata.json")
    with open(train_output_file, "w") as f:
@@ -204,11 +218,33 @@ def main(root_dir, verbose, totals):
    print(f"Training metadata file '{train_output_file}' has been generated successfully.")
    print(f"Test metadata file '{test_output_file}' has been generated successfully.")
 
+def generate_all_metadata(ordered_test_metadata, all_metadata):
+    """Generates metadata for all unique patches, combining train and test data, 
+       and sets clsname to orchard ID for test data in the combined file."""
+    all_patches = {}
+
+    # Add training data (no changes)
+    for entry in all_metadata["train"]:
+        if entry["filename"] not in all_patches:
+            all_patches[entry["filename"]] = entry
+
+    # Add test data (set clsname to orchard ID)
+    for entry in ordered_test_metadata:
+        if entry["filename"] not in all_patches:
+            new_entry = entry.copy()  # Create a copy to avoid modifying the original
+            orchard_id = entry["filename"].split("\\")[0]  # Extract orchard ID
+            new_entry["clsname"] = orchard_id 
+            all_patches[entry["filename"]] = new_entry
+
+    all_metadata_list = list(all_patches.values())
+    return all_metadata_list
+
 if __name__ == "__main__":
    parser = argparse.ArgumentParser(description="Generate metadata for orchard dataset")
    parser.add_argument("root_dir", type=str, help="Root directory where your dataset is located")
    parser.add_argument("-v", "--verbose", action="store_true", help="Print detailed statistics")
    parser.add_argument("-t", "--separate", action="store_true", help="Print total separate for each orchard")
+   parser.add_argument("-o", "--orchard", action="store_true", help="Instead of creating two seperate train and test metadata files create one file for all patches")
    args = parser.parse_args()
 
-   main(os.path.join(os.path.dirname(os.path.realpath(__file__)), args.root_dir), args.verbose, not(args.separate))
+   main(os.path.join(os.path.dirname(os.path.realpath(__file__)), args.root_dir), args.verbose, not(args.separate), args.orchard)

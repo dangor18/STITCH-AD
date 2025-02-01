@@ -1,11 +1,12 @@
-data_path: data/chunks/DRGB_INF_TEST/
-meta_path: data/chunks/DRGB_INF_TEST/metadata/
+data_path: PRE-PROCESS/DATA/PATCHES/DRGB_INF_TEST/
+meta_path_train: PRE-PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/train_metadata.json
+meta_path_test: PRE-PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/all_metadata.json
 resize_x: 256
 resize_y: 256
 channels: 3
 
 model_type: RevisitingRD
-model_path: PATCH_AD/RD/checkpoints/RD_PROJ_WEIGHTED_CBAM_1.pth
+model_path: checkpoints/RD_PROJ_WEIGHTED_CBAM_1.pth
 # relevent model parameters for inference
 architecture: "wide_resnet50_2"
 bn_attention: CBAM

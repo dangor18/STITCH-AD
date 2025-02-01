@@ -141,8 +141,6 @@ class train_dataset(Dataset):
         
         # read image
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
-        label = meta["label"]
-        case = meta["case"]
         image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -202,8 +200,8 @@ class train_dataset(Dataset):
         input.update(
             {
                 "filename": filename,
-                "label": label,
-                "case": case,
+                "label": meta["label"],
+                "case": meta["case"],
                 "normal_image": normal_image,
                 "abnormal_image": img_noise,
             }
@@ -267,8 +265,6 @@ class test_dataset(Dataset):
         
         # read image
         filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
-        label = meta["label"]
-        case = meta["case"]
         image = np.load(filename)
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
@@ -300,8 +296,10 @@ class test_dataset(Dataset):
         input.update(
             {
                 "filename": filename,
-                "label": label,
-                "case": case,
+                "label": meta["label"],
+                "case": meta["case"],
+                "x": meta["x"],
+                "y": meta["y"],
             }
         )
         if meta.get("clsname", None):

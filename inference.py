@@ -1,11 +1,16 @@
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-  
+import sys
+import os
+sys.path.insert(0, "PATCH_AD/RD/")
+sys.path.insert(0, "PATCH_AD/UniAD/")
+sys.path.insert(0, "PATCH_AD/SCADN/")
 # RD model imports
-from PATCH_AD.RD.model import RevisitingRD, RD
-from PATCH_AD.RD.model_utils.test_utils import cal_anomaly_map as anomaly_score_RD
-from PATCH_AD.RD.model_utils.train_utils import get_loaders as get_loaders_RD
+from PATCH_AD.RD.model.RevisitingRD import RevistingRD as RevisitingRD
+from PATCH_AD.RD.model.RD import RD as RD
+from PATCH_AD.RD.model_utils.test_utils import cal_anomaly_score as anomaly_score_RD
+from PATCH_AD.RD.model_utils.train_utils import get_loaders_proj as get_loaders_RD
 # UniAD model imports
 from PATCH_AD.UniAD.datasets import custom_dataset as UniAD_dataset # TODO
 # SCADN model imports
@@ -69,15 +74,13 @@ def get_scores(params, data_loader, device):
     # get the model
     model = load_model(params, device)
     # get corresponding anomaly score function
-    scorer = anomaly_score_RD if params["model_type"] == "RD" else None #TODO
+    scorer = anomaly_score_RD if params["model_type"] == "RevisitingRD" else None #TODO
 
     model.eval()
     with torch.no_grad():    
         for input in tqdm(data_loader):
-            cls_name, lbl = input["clsname"][0].split('_')[0], input["label"][0]   # cls_name either "all" or orchard id
+            cls_name, lbl = input["clsname"][0], input["label"][0].item()   # cls_name either "all" or orchard id
             # libraries used prefer -1 for anomalous and 1 for normal
-            if cls_name == "all":
-                continue
             if lbl == 0:
                 lbl = -1
 
@@ -94,8 +97,8 @@ def get_scores(params, data_loader, device):
     run_time = end_time - start_time
     print("TIME (s):", run_time)
     # write dict to file (only used for the demo)
-    #with open(f"data/{params['model_type']}_score_dict.json", "w") as f:
-    #    json.dump(score_dict, f)
+    with open(f"ORCHARD_AD/{params['model_type']}_score_dict.json", "w") as f:
+        json.dump(score_dict, f)
 
     return score_dict
 
@@ -104,7 +107,7 @@ def get_loaders(params):
         Return the dataloader for inference
     """
     if params["model_type"] == "RD" or params["model_type"] == "RevisitingRD":
-        data_loader = get_loaders_RD(params)
+        data_loader = get_loaders_RD(params, test=True)
     
     return data_loader
 

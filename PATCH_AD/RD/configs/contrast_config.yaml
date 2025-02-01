@@ -1,6 +1,7 @@
 data_path: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/
-meta_path: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/metadata/
-log_path: logs/RD_PROJ_WEIGHTED_CBAM_3.txt
+meta_path_test: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/metadata/test_metadata.json
+meta_path_train: PRE-PROCESS/DATA/PATCHES/DRGB_80-no3/metadata/train_metadata.json
+log_path: logs/test.txt
 resize_x: 256
 resize_y: 256
 flip: 0.5
@@ -21,7 +22,7 @@ ssot_weight: 0.015096731092610782
 contrast_weight: 0.9872387127026788
 reconstruct_weight: 0.6513426603306253
 
-num_epochs: 1
+num_epochs: 20
 batch_size: 32
 proj_lr: 0.001
 distill_lr: 0.005

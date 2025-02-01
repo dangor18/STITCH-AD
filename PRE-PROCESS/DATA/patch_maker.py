@@ -159,7 +159,7 @@ def main():
                     
                 reference_file = os.path.join(path, config["reference"])
                 # get width and height of RGB file for orchard and times each by scale factor (new height and width of each channel for this particular orchard)
-                if os.path.exists(reference_file):
+                if not any("orthomosaic_visible" in s for s in files) and os.path.exists(reference_file):
                     width, height = getTIFDimensions(reference_file)
                 else:
                     rgb_path = os.path.join(path, "orthos", "export-data", "orthomosaic_visible.tif")
@@ -172,6 +172,7 @@ def main():
                     print(f"Scaling every channel to: {scale_width}x{scale_height}")
                     
                 mask_file = os.path.join(path, config["mask"])
+                print(mask_file)
                 output_dir = os.path.join(cwd, config["output_path"])
 
             except KeyError as e:

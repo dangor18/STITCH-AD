@@ -16,8 +16,8 @@ def get_loaders(params):
         Returns the train and test loader given the param config dict 
     """
     transform_fn = transforms.Compose([
-                transforms.RandomHorizontalFlip(p=params["flip"]),
-                transforms.RandomVerticalFlip(p=params["flip"]),
+                transforms.RandomHorizontalFlip(p=params.get("flip", 0.5)),
+                transforms.RandomVerticalFlip(p=params.get("flip", 0.5)),
     ])
     train_data = CustomDataset(
         meta_file=params["meta_path"] + "train_metadata.json", 
@@ -49,29 +49,32 @@ def get_loaders_proj(params, test=False):
     """
         Returns the train and test loader for the Revisiting RD model given the param config dict 
     """
-    train_data = train_dataset(
-        meta_file=params["meta_path"] + "train_metadata.json", 
-        data_path=params["data_path"], 
-        transform_fn=True,
-        p_flip=params["flip"],
-        resize_dim=(params["resize_x"], params["resize_y"]), 
-    )
-    train_loader = DataLoader(
-        train_data, 
-        batch_size=params["batch_size"], 
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        persistent_workers=True,
-    )
     test_data = test_dataset(
-        meta_file=params["meta_path"] + "test_metadata.json",
+        meta_file=params["meta_path_test"],
         data_path=params["data_path"], 
         resize_dim=(params["resize_x"], params["resize_y"]),
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
-    
-    return train_loader, test_loader
+    if not test:
+        train_data = train_dataset(
+            meta_file=params["meta_path_train"], 
+            data_path=params["data_path"], 
+            transform_fn=True,
+            p_flip=params.get("flip", 0.5),
+            resize_dim=(params["resize_x"], params["resize_y"]), 
+        )
+        train_loader = DataLoader(
+            train_data, 
+            batch_size=params["batch_size"], 
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+        
+        return train_loader, test_loader
+    else:
+        return test_loader
 
 def create_model(architecture: str = "wide_resnet50_2", bn_attention: bool = True, in_channels: int = 3):
     """
