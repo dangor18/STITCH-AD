@@ -7,7 +7,7 @@ try:
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 from typing import Type, Any, Callable, Union, List, Optional
-#from torchgeo.models import ResNet50_Weights
+from torchgeo.models import ResNet50_Weights
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
@@ -350,7 +350,7 @@ def _resnet(
     """
     model = ResNet(block, layers, in_channels=in_channels, **kwargs)
     if pretrained:
-        #weights = ResNet50_Weights.SENTINEL2_RGB_SECO
+        #weights = ResNet50_Weights.FMOW_RGB_GASSL
         #state_dict = weights.get_state_dict(progress=progress)
         state_dict = load_state_dict_from_url(model_urls[arch],progress=progress)
         if in_channels == 1:
@@ -363,6 +363,7 @@ def _resnet(
         #    if 'layer4' in k or 'fc' in k:
         #        state_dict.pop(k)
         #state_dict = {k: v for k, v in state_dict.items() if not k.startswith('fc.')}
+        #model.load_state_dict(state_dict, strict=False)
         model.load_state_dict(state_dict)
     return model
 

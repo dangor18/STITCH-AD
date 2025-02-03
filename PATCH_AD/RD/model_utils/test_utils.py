@@ -62,29 +62,18 @@ def get_orchard_stats(orchard_data):
     
     stat_dict["normal"][0] = round(sum(orchard_data["pr_normal"]) / len(orchard_data["pr_normal"]), 5)
     stat_dict["normal"][1] = round(np.std(orchard_data["pr_normal"]), 5)
-    stat_dict["case_2"][0] = round(sum(orchard_data["pr_case_2"]) / len(orchard_data["pr_case_2"]), 5) if not len(orchard_data["pr_case_2"]) == 0 else None
-    stat_dict["case_2"][1] = round(np.std(orchard_data["pr_case_2"]), 5) if not len(orchard_data["pr_case_2"]) == 0 else None
-    stat_dict["case_1"][0] = round(sum(orchard_data["pr_case_1"]) / len(orchard_data["pr_case_1"]), 5) if not len(orchard_data["pr_case_1"]) == 0 else None
-    stat_dict["case_1"][1] = round(np.std(orchard_data["pr_case_1"]), 5) if not len(orchard_data["pr_case_1"]) == 0 else None
-    stat_dict["case_3"][0] = round(sum(orchard_data["pr_case_3"]) / len(orchard_data["pr_case_3"]), 5) if not len(orchard_data["pr_case_3"]) == 0 else None
-    stat_dict["case_3"][1] = round(np.std(orchard_data["pr_case_3"]), 5) if not len(orchard_data["pr_case_3"]) == 0 else None
-
-    return stat_dict, auroc_case1, auroc_case2, auroc_case3
-
-def show_cam_on_image(img, anomaly_map):
-    #if anomaly_map.shape != img.shape:
-    #    anomaly_map = cv2.applyColorMap(np.uint8(anomaly_map), cv2.COLORMAP_JET)
-    cam = np.float32(anomaly_map)/255 + np.float32(img)/255
-    cam = cam / np.max(cam)
-    return np.uint8(255 * cam)
-
-def min_max_norm(image):
-    a_min, a_max = image.min(), image.max()
-    return (image-a_min)/(a_max - a_min)
-
-def cvt2heatmap(gray):
-    heatmap = cv2.applyColorMap(np.uint8(gray), cv2.COLORMAP_JET)
-    return heatmap
+    if auroc_case1:
+        stat_dict["artefact"][0] = round(sum(orchard_data["pr_case_1"]) / len(orchard_data["pr_case_1"]), 5)
+        stat_dict["artefact"][1] = round(np.std(orchard_data["pr_case_1"]), 5)
+        return stat_dict, auroc_case1
+    elif auroc_case2:
+        stat_dict["artefact"][0] = round(sum(orchard_data["pr_case_2"]) / len(orchard_data["pr_case_2"]), 5)
+        stat_dict["artefact"][1] = round(np.std(orchard_data["pr_case_2"]), 5)
+        return stat_dict, auroc_case2
+    elif auroc_case3:
+        stat_dict["artefact"][0] = round(sum(orchard_data["pr_case_3"]) / len(orchard_data["pr_case_3"]), 5)
+        stat_dict["artefact"][1] = round(np.std(orchard_data["pr_case_3"]), 5)
+        return stat_dict, auroc_case3
 
 def evaluate_RD(model, data_loader, device, log_path = None, score_weight = 1.0, feature_weights=[1.0, 1.0, 1.0]):
     """
@@ -119,14 +108,13 @@ def evaluate_RD(model, data_loader, device, log_path = None, score_weight = 1.0,
 
         #auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
         #orchard_auroc_dict[orchard_id] = auroc_total * 100
+        orchard_auroc_dict[orchard_id] = auroc_case * 100
         
         if log_path:
             with open(log_path, "a") as file:
-                    file.write(f"\n-- {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
+                    file.write(f"\n-- {orchard_id}, AUROC: {auroc_case}")
                     file.write(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} STD DEV: {orchard_score_stats['normal'][1]}"+
-                           f"\n++ CASE 1 MEAN: {orchard_score_stats['case_1'][0]} STD DEV: {orchard_score_stats['case_1'][1]}" +
-                           f"\n++ CASE 2 MEAN: {orchard_score_stats['case_2'][0]} STD DEV: {orchard_score_stats['case_2'][1]}" +
-                           f"\n++ CASE 3 MEAN: {orchard_score_stats['case_3'][0]} STD DEV: {orchard_score_stats['case_3'][1]}")
+                           f"\n++ ARTEFACT MEAN: {orchard_score_stats['artefact'][0]} STD DEV: {orchard_score_stats['artefact'][1]}")
 
     # calculate AUROC overall
     average_auroc = sum([x for x in orchard_auroc_dict.values()]) / len(orchard_auroc_dict)

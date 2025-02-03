@@ -1,4 +1,4 @@
-PRE-PROCESS/DATA/configs/*
+PRE_PROCESS/DATA/configs/*
 venv
 env
 myenv
