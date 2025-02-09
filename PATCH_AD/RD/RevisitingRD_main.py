@@ -131,9 +131,9 @@ def train(params, train_loader, test_loader, device):
         model.proj_scheduler.step(metrics=total_auroc)
     
     # test best model after training and plot results
-    test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
-                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
-    plot_auroc(auroc_dict)
+    #test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+    #                feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+    #plot_auroc(auroc_dict)
     return best_auroc, best_epoch
 
 def write_to_file(study, trial):
@@ -197,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()
 
-    config = args.config
+    config = os.path.join(cwd, args.config)
 
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)

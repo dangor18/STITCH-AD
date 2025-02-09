@@ -224,5 +224,6 @@ class CustomDataset(BaseDataset):
             image = image[:3]
 
         input.update({"image": image, "mask": mask})
-
+        input.update({"x": meta["x"], "y": meta["y"]})
+        
         return input

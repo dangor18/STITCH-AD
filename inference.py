@@ -14,6 +14,8 @@ import json
 import optuna
 from sklearn.preprocessing import StandardScaler
 from collections import defaultdict
+import warnings
+warnings.filterwarnings("ignore")
 
 from ORCHARD_AD.inference_utils import *
 
@@ -42,15 +44,23 @@ def get_scores(model_type, params, device):
     print("GETTING PATCH DATA...")
     score_dict = defaultdict(lambda: [])
 
+    model = load_model(model_type, params, device)
+    data_loader = get_loaders(model_type, params)
     if model_type == "RD" or model_type == "RevisitingRD":
-        score_dict = get_scores_RD(params, device)
+        score_dict = get_scores_RD(model, data_loader, params, device)
+    elif model_type == "UniAD":
+        score_dict = get_scores_UniAD(model, data_loader, params, device)
+    elif model_type == "SCADN":
+        score_dict = get_scores_SCADN(model, data_loader, params, device)
+    else:
+        exit("[ERROR] UNKOWN MODEL")
     
     end_time = time.time()
     run_time = end_time - start_time
     print("TIME (s):", run_time)
-    # write dict to file (only used for the demo)
-    with open(f"ORCHARD_AD/{params['model_type']}_score_dict.json", "w") as f:
-        json.dump(score_dict, f)
+    # write dict to file (only used for the demo) TODO
+    #with open(f"ORCHARD_AD/{model_type}_score_dict.json", "w") as f:
+    #    json.dump(score_dict, f)
 
     return score_dict
 
@@ -326,13 +336,22 @@ def print_results(pr_dict, normal_cm, anomalous_cm):
     #print("NORMAL ORCHARD F1 SCORE:", get_F1(normal_cm))
 
 if __name__ == "__main__":
+    config_dir = "ORCHARD_AD/configs/"
     arg_parser = ArgumentParser()
-    arg_parser.add_argument("--config", type=str, default="configs/inference.yaml")
+    arg_parser.add_argument("--orchard_config", "-oc", type=str, default="orchard_level_config.yaml")
+    arg_parser.add_argument("--model_type", "-m", type=str, default="RevisitingRD", help="model type to use (RD, RevisitingRD, UniAD, SCADN)")
+    arg_parser.add_argument("--model_config", "-mc", type=str, default="RD_config.yaml")
     arg_parser.add_argument("--test", action="store_true", help="load stored data from DL model instead of infering on each patch. Just here for making the demo faster")
     arg_parser.add_argument("--tune", action="store_true", help="for tuning HDBSCAN params with Optuna")
     args = arg_parser.parse_args()
-    with open(args.config, "r") as f:
-        params = yaml.safe_load(f)
+    model_type = args.model_type
+    with open(os.path.join(config_dir, args.orchard_config), "r") as f:
+        orchard_params = yaml.safe_load(f)
+    if model_type == "UniAD":
+        model_params = load_config_UniAD(os.path.join(config_dir, args.model_config))
+    else:
+        with open(os.path.join(config_dir, args.model_config), "r") as f:
+            model_params = yaml.safe_load(f)
 
     # tune the orchard level models WIP
     if args.tune:
@@ -347,15 +366,15 @@ if __name__ == "__main__":
         
         # load the json file and skip the DL model inference part WIP
         if args.test:
-            with open(f"data/{params['model_type']}_score_dict.json", "r") as f:
+            with open(f"data/{model_type}_score_dict.json", "r") as f:
                 score_dict = json.load(f)
         else:
             # start here
-            score_dict = get_scores(params["model_type"], params, device)
+            score_dict = get_scores(model_type, model_params, device)
 
-        pr_dict, normal_cm, anomalous_cm = infer_iso_forest(params, score_dict)
+        pr_dict, normal_cm, anomalous_cm = infer_iso_forest(orchard_params, score_dict)
         print("===================== ISOLATION FOREST =====================")
         print_results(pr_dict, normal_cm, anomalous_cm)
-        pr_dict, normal_cm, anomalous_cm = infer_dbscan(params, score_dict)
+        pr_dict, normal_cm, anomalous_cm = infer_dbscan(orchard_params, score_dict)
         print("========================== DBSCAN ==========================")
         print_results(pr_dict, normal_cm, anomalous_cm)

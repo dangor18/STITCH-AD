@@ -247,7 +247,7 @@ class test_dataset(Dataset):
         """
         fig, axs = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM']):
+        for i, channel_name in enumerate(['DEM', 'Sobel', 'Red']):
             axs[i].set_xlabel('X', size=16)
             axs[i].set_ylabel('Y', size=16)
             axs[i].set_title(f'{channel_name} Channel', size=18)
