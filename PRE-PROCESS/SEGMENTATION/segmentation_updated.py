@@ -272,8 +272,8 @@ def load_sam_model(config):
     
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
-    if device == 'cuda':
-        sam = sam.half()  # Enable FP16 for better efficiency
+    # if device == 'cuda':
+    #     sam = sam.half()  # Enable FP16 for better efficiency
     
     mask_generator = SamAutomaticMaskGenerator(
         sam,
@@ -284,8 +284,48 @@ def load_sam_model(config):
     )
     return mask_generator
 
+def create_threshold_mask1(image, config):
+   """Apply preprocessing with final binary thresholding"""
+   image = image.transpose(1, 2, 0)
+   img_f = image.astype(np.float32)
+   
+   # Calculate vegetation indices
+   ratio = 255 * (img_f[:,:,1] / (img_f[:,:,0] + 1))
+   shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
+   seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
+
+   # Normalize and enhance
+   ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
+   shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
+   seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
+   
+   clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+   ratio = clahe.apply(ratio.astype(np.uint8))
+   shadow = clahe.apply(shadow.astype(np.uint8))
+   seasonal = clahe.apply(seasonal.astype(np.uint8))
+
+   # Combine channels
+   enhanced = np.dstack([ratio, shadow, seasonal])
+   enhanced = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX)
+   
+   # save debug
+   save_debug_image(enhanced, "01_enhanced", config['output_dir'])
+   
+   # Convert to HSV for final thresholding
+   hsv = cv2.cvtColor(enhanced.astype(np.uint8), cv2.COLOR_RGB2HSV)
+   
+   # Apply binary threshold with tuned values
+   lower = np.array([80, 180, 60])   # Cyan-green hue, moderate saturation/value minimums
+   upper = np.array([85, 255, 255])  # Blue-green hue, max saturation/value
+   mask = cv2.inRange(hsv, lower, upper)
+   
+#    kernel = np.ones((3,3), np.uint8)
+#    mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=1)
+   
+   return mask
+
 def create_threshold_mask(image, config):
-    """Apply preprocessing with enhanced normalization"""
+    """Edge detection with targeted edge enhancement"""
     image = image.transpose(1, 2, 0)
     img_f = image.astype(np.float32)
     
@@ -294,24 +334,41 @@ def create_threshold_mask(image, config):
     shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
     seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
 
-    # Normalize each channel individually
+    # Initial normalization and enhancement
     ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
     shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
     seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
     
-    # Enhance contrast
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     ratio = clahe.apply(ratio.astype(np.uint8))
     shadow = clahe.apply(shadow.astype(np.uint8))
     seasonal = clahe.apply(seasonal.astype(np.uint8))
 
-    # Combine channels with orchard areas enhanced
-    result = np.dstack([ratio, shadow, seasonal])
+    # Combine weighted channels
+    weighted = (ratio * 0.4 + shadow * 0.2 + seasonal * 0.4).astype(np.uint8)
+    save_debug_image(weighted, "01_weighted", config['output_dir'])
+
+    # Edge detection
+    blur = cv2.GaussianBlur(weighted, (5, 5), 0)
+    sobelx = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
+    sobel = np.sqrt(sobelx**2 + sobely**2)
+    sobel = cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    save_debug_image(sobel, "02_sobel_raw", config['output_dir'])
+
+    # Enhance edges in target range
+    target = 10       # Target edge strength
+    delta = 10       # Range around target to enhance
+    strength = 1.0   # Enhancement multiplier
     
-    # Additional normalization to ensure orchards are lighter
-    result = cv2.normalize(result, None, 0, 255, cv2.NORM_MINMAX)
+    enhanced = sobel.astype(np.float32)
+    diff = enhanced - target
+    mask = np.abs(diff) < delta
+    enhanced[mask] = target + (diff[mask] * strength)
+    enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
     
-    return np.uint8(result)
+    save_debug_image(enhanced, "03_enhanced", config['output_dir'])
+    return enhanced
 
 def further_downscale_for_sam(image, target_size):
     """
@@ -349,18 +406,25 @@ def remove_small_segments(masks, min_size, image_shape, image, pixel_value_thres
     """
     combined_mask = np.zeros(image_shape, dtype=bool)
     total_pixels = image_shape[0] * image_shape[1]
-    for mask in masks:
+    # First collect all valid segments before erosion
+    valid_segments = []
+    for mask in masks[1:]:
         segment = mask['segmentation']
-        if (np.sum(segment)/total_pixels >= min_size) or (np.sum(segment) >= 12000):
+        if (np.sum(segment)/total_pixels >= min_size) or (np.sum(segment) >= 1000):
             segmented_pixels = image[segment]
             avg_pixel_value = np.mean(segmented_pixels)/255
-            # Check if the segment is a dam
             num_pixels = np.sum(segment)
-            if (avg_pixel_value >= pixel_value_threshold) or num_pixels/total_pixels >= 0.3:
-                # corrode the mask
-                kernel = np.ones((3, 3), np.uint8)
-                segment = cv2.erode(segment.astype(np.uint8), kernel, iterations=1).astype(bool)
-                combined_mask = np.logical_or(combined_mask, segment)         
+            if (avg_pixel_value >= pixel_value_threshold) or num_pixels/total_pixels >= 0.01:
+                valid_segments.append(segment)
+
+    # Now erode each valid segment and add to combined mask
+    kernel = np.ones((5, 5), np.uint8)  # Increased kernel size for more separation
+    for segment in valid_segments:
+        # Erode more aggressively to ensure separation
+        eroded = cv2.erode(segment.astype(np.uint8), kernel, iterations=2)
+        # Add to combined mask - segments will remain separate due to erosion
+        combined_mask = np.logical_or(combined_mask, eroded.astype(bool))
+    
     return combined_mask
 
 def process_segment(args):
@@ -374,14 +438,14 @@ def process_segment(args):
         int or None: Segment label if it should be removed, None otherwise.
     """
     label, segment, nodata_mask, max_nodata_percentage, kernel = args
-    if np.packbits(segment).sum() * 8 < 20000:  # Approximate but faster count
+    if np.sum(segment) < 8000:
         return label
-    kernel = kernel.astype(np.uint8)
-    dilated_segment = cv2.dilate(segment.astype(np.uint8), kernel, iterations=1)
-    nodata_overlap = cv2.bitwise_and(dilated_segment, nodata_mask.astype(np.uint8))
-    nodata_count = np.unpackbits(np.packbits(nodata_overlap)).sum()
-    segment_size = np.unpackbits(np.packbits(dilated_segment)).sum()
+    dilated_segment = ndimage.binary_dilation(segment, structure=kernel)
+    nodata_count = np.sum(dilated_segment & nodata_mask)
+    segment_size = np.sum(dilated_segment)
+    print(f'Segment: {nodata_count}/{segment_size}--: {nodata_count*100 / segment_size}%')
     if (segment_size > 0 and (nodata_count / segment_size) > max_nodata_percentage):
+        print(f'Segment removed with {nodata_count*100 / segment_size}% nodata pixels')
         return label
     return None
 
@@ -401,12 +465,14 @@ def remove_nodata_segments(mask, rgb_image, nodata_value, max_nodata_percentage,
         numpy.ndarray: Updated mask with high no-data segments removed.
     """
     labeled, num_features = ndimage.label(mask)
+    print(f'Number of segments: {num_features}')
     if rgb_image.shape[0] == 4:
         rgb_image = rgb_image.transpose(1, 2, 0)
-    
+                
     # Create nodata mask
     nodata_mask = np.all(rgb_image == nodata_value, axis=-1)
     
+    print(f'Number of nodata pixels: {np.sum(nodata_mask)}')
     # Create morphological kernel
     kernel = np.ones((border_size, border_size), dtype=bool)
         
@@ -588,7 +654,7 @@ def save_debug_image(image, filename, output_dir):
         filename: Name for the saved files
         output_dir: Output directory
     """
-    return
+    # return
     debug_dir = os.path.join(output_dir, "debug")
     os.makedirs(debug_dir, exist_ok=True)
     
@@ -600,8 +666,9 @@ def save_debug_image(image, filename, output_dir):
             image_to_save = image.transpose(1, 2, 0)
         else:  # Already in HWC format
             image_to_save = image
-        plt.imsave(os.path.join(debug_dir, f"{filename}.png"), image_to_save)
-    
+        print(f'Image saved with name: {filename}')
+        print(f'Reduced name: {filename[17:22]+filename[72:]}')
+        plt.imsave(os.path.join(debug_dir, f"{filename[17:22]+filename[72:]}.png"), image_to_save)   
     
 def process_single_file(input_file, output_dir, config, mask_generator):
     """
@@ -631,7 +698,7 @@ def process_single_file(input_file, output_dir, config, mask_generator):
 
     # Downscaling and loading initial image
     if os.path.exists(downscaled_file):
-        print("Loading existing downscaled image...")
+        print(f"Loading existing downscaled image: {downscaled_file}")
         with rasterio.open(downscaled_file) as src:
             downscaled_image = src.read()
             output_profile = src.profile.copy()
@@ -641,39 +708,33 @@ def process_single_file(input_file, output_dir, config, mask_generator):
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
     
-    save_debug_image(downscaled_image, f"{unique_id}_01_downscaled", output_dir)
-
-    original_image = downscaled_image
-    save_debug_image(original_image, f"{unique_id}_02_original", output_dir)
+    save_debug_image(downscaled_image, f"{unique_id}_02_original", output_dir)
     
     # Apply autumn filter
-    image = original_image
-    # image = apply_autumn_filter(original_image)
-    save_debug_image(image, f"{unique_id}_03_autumn", output_dir)
-    # print(f'SHape of autum image: {image.shape}')
+    image = downscaled_image
+    
+    # autum_image = apply_autumn_filter(original_image)
+    # save_debug_image(autum_image, f"{unique_id}_03_autumn", output_dir)
+    # print(f'SHape of autum image: {.shape}')
+    
+    config["output_dir"] = output_dir
     
     # Threshold mask creation
     threshold_mask = create_threshold_mask(image, config)
-    save_debug_image(threshold_mask, f"{unique_id}_04_threshold", output_dir)
     
     # SAM preprocessing
     sam_image = further_downscale_for_sam(threshold_mask, config['segmentation']['sam_target_size'])
-    save_debug_image(sam_image, f"{unique_id}_05_sam_input", output_dir)
-
+    
     # Segmentation
     segmentation_mask = segment_image(sam_image, mask_generator, config)
-    save_debug_image(segmentation_mask.astype(np.uint8)*255, f"{unique_id}_06_segmentation", output_dir)
     
-    print(segmentation_mask.shape)
-
+    # save_debug_image(segmentation_mask.astype(np.uint8)*255, f"{unique_id}_06_segmentation", output_dir)
+    
     print("Segmentation completed.")
-    
-    print(f'Image shape before upscale: {image.shape}')
-    
+       
     # Mask upscaling
     upscaled_mask = cv2.resize(segmentation_mask.astype(np.uint8), (image.shape[2], image.shape[1]), 
                               interpolation=cv2.INTER_NEAREST)
-    save_debug_image(upscaled_mask*255, f"{unique_id}_07_upscaled", output_dir)
     
     print("Upscaling completed.")
 
@@ -683,10 +744,10 @@ def process_single_file(input_file, output_dir, config, mask_generator):
     border_size = config['segmentation'].get('border_size', 3)
     
     print("Removing no-data segments...")
-    cleaned_mask = remove_nodata_segments(upscaled_mask, original_image, nodata_value, 
+    cleaned_mask = remove_nodata_segments(upscaled_mask, downscaled_image, nodata_value, 
                                         max_nodata_percentage, border_size, num_threads=12)
     
-    save_debug_image(cleaned_mask*255, f"{unique_id}_08_cleaned", output_dir)
+    # save_debug_image(cleaned_mask*255, f"{unique_id}_08_cleaned", output_dir)
     
     print("No-data removal completed.")
     

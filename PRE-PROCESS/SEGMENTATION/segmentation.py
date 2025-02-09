@@ -195,8 +195,59 @@ def create_threshold_mask(image, config):
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    
+    print(mask.shape)
     return mask
+
+def create_threshold_mask(image, config):
+    """Combine vegetation indices with edge detection"""
+    img_f = image.astype(np.float32)
+    
+    # Calculate vegetation indices
+    ratio = 255 * (img_f[:,:,1] / (img_f[:,:,0] + 1))
+    shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
+    seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
+
+    # Normalize and enhance
+    ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
+    shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
+    seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
+    
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    ratio = clahe.apply(ratio.astype(np.uint8))
+    shadow = clahe.apply(shadow.astype(np.uint8))
+    seasonal = clahe.apply(seasonal.astype(np.uint8))
+
+    # Combine channels
+    enhanced = np.dstack([ratio, shadow, seasonal])
+    enhanced = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX)
+    
+    # Edge detection on enhanced image
+    blur = cv2.GaussianBlur(enhanced, (5, 5), 0)
+    
+    # Multi-scale Sobel
+    sobelx = cv2.Sobel(blur, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3)
+    sobel = np.sqrt(sobelx**2 + sobely**2)
+    sobel = cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    
+    # Laplacian for additional detail
+    laplacian = cv2.Laplacian(blur, cv2.CV_64F)
+    laplacian = cv2.normalize(np.abs(laplacian), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    
+    # Combine edge detections
+    edges = cv2.addWeighted(sobel, 0.7, laplacian, 0.3, 0)
+    
+    # Binary threshold the edges
+    _, edge_mask = cv2.threshold(edges, 40, 255, cv2.THRESH_BINARY)
+    
+    # Morphological operations
+    kernel = np.ones((3,3), np.uint8)
+    
+    # Dilate to expand edges
+    dilated = cv2.dilate(edge_mask, kernel, iterations=2)
+    print(dilated.shape)
+        
+    return dilated
 
 def further_downscale_for_sam(image, target_size):
     """
@@ -355,13 +406,14 @@ def segment_image(image, mask_generator, config):
     Returns:
         numpy.ndarray: Combined binary mask after processing.
     """ 
+    print(image.shape)
     # Ensure image is in the correct format for SAM (3D, RGB)
     if image.ndim == 2:
         image = np.stack([image, image, image], axis=-1)
     
     # Generate masks
     masks = mask_generator.generate(image)
-    #show_masks(image, masks, random_colors=True)
+    show_masks(image, masks, random_colors=True)
     # Remove small segments and combine masks
     min_segment_size = config['segmentation']['min_segment_size']
     combined_mask = remove_small_segments(masks, min_segment_size, image.shape[:2], image, config['segmentation']['pixel_value_threshold'])
