@@ -1,0 +1,13 @@
+data_path: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/
+meta_path_train: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/train_metadata.json
+meta_path_test: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/all_metadata.json
+resize_x: 256
+resize_y: 256
+channels: 3
+
+checkpoint: checkpoints/RevisitingRDTuned.pth
+# relevent model parameters for inference
+architecture: "wide_resnet50_2"
+bn_attention: False
+feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
+score_weight: 0.483015283613563

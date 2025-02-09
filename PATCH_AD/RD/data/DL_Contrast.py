@@ -1,0 +1,319 @@
+import torch
+import torchvision.transforms.functional as F
+from torch.utils.data import DataLoader, Dataset
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import cv2
+from scipy import ndimage
+from sklearn.decomposition import PCA
+from skimage import filters
+from data.noise import Simplex_CLASS
+from torchvision import transforms
+import json
+import random
+    
+class train_dataset(Dataset):
+    def __init__(
+        self,
+        meta_file,
+        data_path,
+        resize_dim=(256, 256),
+        transform_fn=None,
+        p_flip=0.5,
+    ):
+        self.meta_file = meta_file
+        self.data_path = data_path
+        self.resize_dim = resize_dim
+        self.simplexNoise = Simplex_CLASS()
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
+        self.transform_fn = transform_fn
+        self.p_flip = p_flip
+        
+        # construct metas
+        with open(self.meta_file, "r") as f_r:
+            self.metas = []
+            for line in f_r:
+                meta = json.loads(line)
+                self.metas.append(meta)
+
+    def __len__(self):
+        return len(self.metas)
+    
+    def plot_channels(self, image, title):
+        """
+            Plot data channels when loading data, used for testing
+        """
+        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig.suptitle(title, size=20)
+        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
+            axs[i].set_xlabel('X', size=16)
+            axs[i].set_ylabel('Y', size=16)
+            axs[i].set_title(f'{channel_name} Channel', size=18)
+            axs[i].axis('off')
+            if i == 0:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
+            else:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
+        plt.tight_layout()
+        plt.show()
+
+    def get_psuedo_case1(self, dem, seed=None):
+        """
+            Returns psuedo case 1 by erasing a random portion of the dem and applying a smoothed out gradient
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        # set sizes
+        size = 256
+        h_noise = np.random.randint(128, 200)
+        w_noise = np.random.randint(128, 200)
+        start_h_noise = np.random.randint(1, size - h_noise)
+        start_w_noise = np.random.randint(1, size - w_noise)
+        
+        # random scales and rotation
+        scale_x = np.random.uniform(0.5, 2.0)
+        scale_y = np.random.uniform(0.5, 2.0)
+        rotation = np.random.uniform(0, 2*np.pi)
+    
+        y, x = np.ogrid[:h_noise, :w_noise]
+        x = x / w_noise - 0.5
+        y = y / h_noise - 0.5
+    
+        # apply rotation
+        x_rot = x * np.cos(rotation) - y * np.sin(rotation)
+        y_rot = x * np.sin(rotation) + y * np.cos(rotation)
+    
+        gradient_x = x_rot * scale_x
+        gradient_y = y_rot * scale_y
+    
+        gradient = gradient_x + gradient_y
+        gradient = (gradient - np.min(gradient)) / (np.max(gradient) - np.min(gradient))
+
+        # get mean and std dev of region you're erasing to normalize grad
+        mean = np.mean(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
+        std = np.std(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
+
+        intensity = np.random.uniform(3, 4) * std
+        gradient = gradient * intensity + mean - intensity/2
+        
+        # apply the gradient to the specified region
+        dem_copy = dem.copy()
+        dem_copy[start_h_noise:start_h_noise + h_noise, start_w_noise:start_w_noise + w_noise] = gradient
+        
+        return dem_copy
+
+    def get_psuedo_case2(self, dem, amplitude=1):
+        """"
+            Return psuedo case 2 by adding simplex noise to the dem
+        """
+        # add simplex noise to create pseudo abnormal sample
+        size = 256
+        h_noise = np.random.randint(128, 200)
+        w_noise = np.random.randint(128, 200)
+        start_h_noise = np.random.randint(1, size - h_noise)
+        start_w_noise = np.random.randint(1, size - w_noise)
+        noise_size = (h_noise, w_noise)
+        simplex_noise = self.simplexNoise.rand_3d_octaves((3, *noise_size), 9, 0.8)
+        init_noise = np.zeros((256, 256, 3))
+        std = np.std(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
+        init_noise[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise, :] = simplex_noise.transpose(1,2,0) * std * amplitude
+        dem_noise = dem + init_noise[:, :, 0]
+        return dem_noise
+    
+    def apply_flips(self, normal_img, noise_img):
+        """
+            Apply random flips to the normal and noise image
+        """
+        if random.random() > self.p_flip:
+            normal_img = F.hflip(normal_img)
+            noise_img = F.hflip(noise_img)
+        if random.random() > self.p_flip:
+            normal_img = F.vflip(normal_img)
+            noise_img = F.vflip(noise_img)
+        return normal_img, noise_img
+    
+    def __getitem__(self, index):
+        input = {}
+        meta = self.metas[index]
+        
+        # read image
+        filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
+        image = np.load(filename)
+        if self.resize_dim:
+            image = cv2.resize(image, self.resize_dim)
+
+        # get normal data
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        red = image[:, :, 1]
+        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
+        reg = image[:, :, 2]
+        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
+        grey = image[:, :, 1] / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+
+        dem_na= dem[:, :, np.newaxis]
+        red_na = red[:, :, np.newaxis]
+        reg_na = reg[:, :, np.newaxis]
+        sobel_dem_na = sobel_dem[:, :, np.newaxis]
+        grey_na = grey[:, :, np.newaxis]
+        normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
+        #normal_image = np.concatenate([dem_na, sobel_dem_na, red_na], axis=2)
+        normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
+        #normal_image = torch.from_numpy(dem).float().unsqueeze(0)
+        
+        # randomly choose either case 1 or 2 psuedo-artefact
+        choice = random.choice([1, 2])
+        if choice == 1:
+            dem_noise = self.get_psuedo_case1(dem)
+        elif choice == 2:
+            dem_noise = self.get_psuedo_case2(dem, amplitude=0.7)
+
+        sobel_noise = ndimage.sobel(dem_noise)
+        sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
+        dem_na = dem_noise[:, :, np.newaxis]
+        #grey_na = grey[:, :, np.newaxis]
+        red_na = red[:, :, np.newaxis]
+        reg_na = reg[:, :, np.newaxis]
+        sobel_noise = sobel_noise[:, :, np.newaxis]
+
+        img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
+        #img_noise = np.concatenate([dem_na, sobel_noise, red_na], axis=2)
+        img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
+        #img_noise = torch.from_numpy(dem_noise).float().unsqueeze(0)    
+        
+        # apply flips
+        if self.transform_fn:
+            normal_image, img_noise = self.apply_flips(normal_image, img_noise)
+
+        # normalize
+        if self.normalize:
+            img_noise = self.normalize(img_noise)
+            normal_image = self.normalize(normal_image)
+
+        input.update(
+            {
+                "filename": filename,
+                "label": meta["label"],
+                "case": meta["case"],
+                "normal_image": normal_image,
+                "abnormal_image": img_noise,
+            }
+        )
+        if meta.get("clsname", None):
+            input["clsname"] = meta["clsname"]
+        else:
+            input["clsname"] = filename.split("/")[-4]
+
+        #print(normal_image)
+        #print(img_noise)
+        #self.plot_channels(normal_image, "Normal Image Channels")
+        #self.plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
+
+        return input
+    
+class test_dataset(Dataset):
+    def __init__(
+        self,
+        meta_file,
+        data_path,
+        resize_dim=(256, 256),
+    ):
+        self.meta_file = meta_file
+        self.data_path = data_path
+        self.resize_dim = resize_dim
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
+
+        # construct metas
+        with open(meta_file, "r") as f_r:
+            self.metas = []
+            for line in f_r:
+                meta = json.loads(line)
+                self.metas.append(meta)
+
+    def __len__(self):
+        return len(self.metas)
+    
+    def plot_channels(self, image, title):
+        """
+            Plot data channels when loading data, used for testing
+        """
+        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig.suptitle(title, size=20)
+        for i, channel_name in enumerate(['DEM', 'Sobel', 'Red']):
+            axs[i].set_xlabel('X', size=16)
+            axs[i].set_ylabel('Y', size=16)
+            axs[i].set_title(f'{channel_name} Channel', size=18)
+            axs[i].axis('off')
+            if i == 0:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
+            else:
+                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
+        plt.tight_layout()
+        plt.show()
+
+    def __getitem__(self, index):
+        input = {}
+        meta = self.metas[index]
+        
+        # read image
+        filename = os.path.join(self.data_path, meta["filename"].replace("\\", "/"))
+        image = np.load(filename)
+        if self.resize_dim:
+            image = cv2.resize(image, self.resize_dim)
+
+        dem = image[:, :, 0]
+        dem_min = np.percentile(dem, 5)
+        dem_max = np.percentile(dem, 95)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        rgb = image[:, :, 1]
+        grey = rgb / 255
+        sobel_dem = ndimage.sobel(dem)
+        sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+        red = image[:, :, 1]
+        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
+        reg = image[:, :, 2]
+        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
+
+        dem_na = dem[:, :, np.newaxis]
+        red = red[:, :, np.newaxis]
+        reg = reg[:, :, np.newaxis]
+        sobel_dem = sobel_dem[:, :, np.newaxis]
+        #image = np.concatenate([dem, sobel_dem, red], axis=2)
+        grey = grey[:, :, np.newaxis]
+        image = np.concatenate([dem_na, sobel_dem, grey], axis=2)
+
+        image = torch.from_numpy(image).float().permute(2, 0, 1)
+        #image = torch.from_numpy(dem).float().unsqueeze(0)
+
+        input.update(
+            {
+                "filename": filename,
+                "label": meta["label"],
+                "case": meta["case"],
+                "x": meta["x"],
+                "y": meta["y"],
+            }
+        )
+        if meta.get("clsname", None):
+            input["clsname"] = meta["clsname"]
+        else:
+            input["clsname"] = filename.split("/")[-4]
+
+        # normalize
+        if self.normalize:
+            image = self.normalize(image)
+
+        input.update({"image": image})
+
+        #self.plot_channels(image, "Artefact Image Channels")
+        #self.plot_channels(noisy_image, "Noisy Image Channels")
+
+        return input
