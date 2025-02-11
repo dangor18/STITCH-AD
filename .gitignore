@@ -9,3 +9,4 @@ myenv
 *.log
 __pycache__
 PATCH-AD/UniAD/UniAD/*
+*.png
