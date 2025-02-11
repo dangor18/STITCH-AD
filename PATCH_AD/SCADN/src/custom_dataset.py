@@ -108,7 +108,7 @@ class StitchoDataset(Dataset):
         # noisy_image = add_noise(image, self.noise_factor, self.p)
         # input.update({"noisy_image": noisy_image})
         
-        return input['image'], input['label'], input['clsname']
+        return input['image'], input['label'], input['clsname'], meta['x'], meta['y']
     
     def get_class_count(self):
         return {clsname: count for clsname, count in self.class_count.items()}
@@ -117,8 +117,8 @@ def load_data(opt):
 
     
 
-    train_metadata = os.path.join(opt.dataroot, 'metadata/train_metadata.json')
-    test_metadata = os.path.join(opt.dataroot, 'metadata/test_metadata.json')
+    train_metadata = os.path.join(opt.dataroot, f'metadata/{opt.train_meta}')
+    test_metadata = os.path.join(opt.dataroot, f'metadata/{opt.test_meta}')
 
     splits = ['train', 'test', 'train4val']
 
@@ -187,18 +187,22 @@ class AddMask():
         imgs = []
         label = []
         clsnames = []
+        xs = []
+        ys = []
         for i in range(len(batch)):
-            img, target, clsname = batch[i]
+            img, target, clsname, x, y = batch[i]
             imgs.append(img)
             masks.append(random.choice(self.mask_set))
             label.append(target)
             clsnames.append(clsname)
+            xs.append(x)
+            ys.append(y)
         imgs = torch.stack(imgs, dim=0)
         mask_batch = torch.stack(masks, dim=0)
         label = torch.FloatTensor(label)
         if self.mask_type == 0:
             mask_batch = None
-        return imgs, mask_batch, label, clsnames
+        return imgs, mask_batch, label, clsnames, xs, ys
     
 def get_custom_anomaly_dataset(subset, nrm_cls):
     nrm_cls_idx = subset.class_to_idx[nrm_cls]

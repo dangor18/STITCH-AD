@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import torch
 import torch.nn as nn
@@ -120,7 +121,7 @@ class ExpStitchO():
                 for items in train_loader:
                     self.inpaint_model.train()
 
-                    images, masks, label, _ = items
+                    images, masks, label, _, _, _ = items
                     images, masks = self.cuda(images, masks)
                     # images = self.cuda(images)
 
@@ -198,7 +199,7 @@ class ExpStitchO():
         for index, items in enumerate(test_loader):
             start_index = index * test_loader.batch_size
             end_index = start_index + items[0].shape[0]
-            images, masks, label, clsname = items
+            images, masks, label, clsname, _, _ = items
             images, masks = self.cuda(images, masks)
 
             # print(clsname)
@@ -229,6 +230,45 @@ class ExpStitchO():
             aucs[class_name] = auc1
         return aucs
 
+    def get_score_dict(self):
+        score_dict = defaultdict(lambda: [])
+        self.inpaint_model.eval()
+        test_loader = self.dataset['test']
+        class_count = self.dataset_info['test'].get_class_count()
+        class_index = {clsname: i for i, clsname in enumerate(class_count.keys())}
+        total = len(test_loader.dataset)
+        progbar = Progbar(total, width=20, stateful_metrics=['it'])
+
+        for index, items in enumerate(test_loader):
+            images, masks, labels, clsnames, xs, ys = items
+            images, masks = self.cuda(images, masks)
+            
+            # inpaint model
+            error1_list, mix_out_list_x, mix_out_list_y = self.get_error_map_for_some_scales(
+                images, self.masks, metric='MSE',
+                scales=self.config.SCALES, output=True
+            )
+            error1, max_scale_ind = self.get_max_select_error(error1_list, need_arg=True)
+            scores = torch.mean(error1, [1, 2]).cpu()  # returns batch size scores
+
+            # process each batch
+            for i in range(len(images)):
+                label = labels[i].item()
+                if label == 0:
+                    label = -1
+                
+                # add each batch details to the dict
+                clsname = clsnames[i]
+                x = xs[i]
+                y = ys[i]
+                score = scores[i].item()
+                
+                score_dict[clsname].append([x, y, score, label])
+            
+            progbar.add(len(images), values=[('index', index)])
+        
+        return score_dict
+    
     def get_error_map_coarse(self, images, mask_loader, metric='MSE'):
         if metric == 'MSE':
             error_metric = nn.MSELoss(reduction='none')

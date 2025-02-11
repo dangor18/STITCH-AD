@@ -8,17 +8,17 @@ dataset:
   image_reader:
     type: npy
     kwargs:
-      image_dir: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRR_80\
+      image_dir: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\
 
   train:
-    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRR_80\metadata\all_metadata.json
+    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\metadata\all_metadata.json
     rebalance: False
-    hflip: True
-    vflip: True
-    rotate: True
+    hflip: False
+    vflip: False
+    rotate: False
 
   test:
-    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRR_80\metadata\all_metadata.json
+    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\metadata\all_metadata.json
 
   input_size: [224,224] # [h,w]
   batch_size: 1
