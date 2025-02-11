@@ -347,10 +347,14 @@ if __name__ == "__main__":
     model_type = args.model_type
     with open(os.path.join(config_dir, args.orchard_config), "r") as f:
         orchard_params = yaml.safe_load(f)
+    
+    model_config_path = os.path.join(config_dir, args.model_config)
     if model_type == "UniAD":
-        model_params = load_config_UniAD(os.path.join(config_dir, args.model_config))
-    else:
-        with open(os.path.join(config_dir, args.model_config), "r") as f:
+        model_params = load_config_UniAD(model_config_path)
+    elif model_type == "SCADN":
+        model_params = load_config_SCADN(model_config_path)
+    elif model_type == "RD" or model_type == "RevisitingRD":
+        with open(model_config_path, "r") as f:
             model_params = yaml.safe_load(f)
 
     # tune the orchard level models WIP
