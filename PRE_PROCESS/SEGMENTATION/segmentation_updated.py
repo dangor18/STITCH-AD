@@ -272,11 +272,12 @@ def load_sam_model(config):
     
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
-    # if device == 'cuda':
-    #     sam = sam.half()  # Enable FP16 for better efficiency
+    if device == 'cuda':
+        sam = sam.half()  # Enable FP16 for better efficiency
     
     mask_generator = SamAutomaticMaskGenerator(
         sam,
+        points_per_side=config['segmentation']['points_per_side'],
         pred_iou_thresh=config['segmentation']['pred_iou_thresh'],
         stability_score_thresh=config['segmentation']['stability_score_thresh'],
         box_nms_thresh=config['segmentation']['box_nms_thresh'],
@@ -325,27 +326,24 @@ def create_threshold_mask1(image, config):
    return mask
 
 def create_threshold_mask(image, config):
-    """Edge detection with targeted edge enhancement"""
+    """Edge detection with targeted edge enhancement and watershed segmentation"""
     image = image.transpose(1, 2, 0)
     img_f = image.astype(np.float32)
     
     # Calculate vegetation indices
-    ratio = 255 * (img_f[:,:,1] / (img_f[:,:,0] + 1))
     shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
     seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
 
     # Initial normalization and enhancement
-    ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
     shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
     seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
     
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    ratio = clahe.apply(ratio.astype(np.uint8))
     shadow = clahe.apply(shadow.astype(np.uint8))
     seasonal = clahe.apply(seasonal.astype(np.uint8))
 
     # Combine weighted channels
-    weighted = (ratio * 0.4 + shadow * 0.2 + seasonal * 0.4).astype(np.uint8)
+    weighted = (shadow * 0.5 + seasonal * 0.5).astype(np.uint8)
     save_debug_image(weighted, "01_weighted", config['output_dir'])
 
     # Edge detection
@@ -354,12 +352,14 @@ def create_threshold_mask(image, config):
     sobely = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
     sobel = np.sqrt(sobelx**2 + sobely**2)
     sobel = cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    save_debug_image(sobel, "02_sobel_raw", config['output_dir'])
+
+    # CLAHE enhance edges
+    sobel = clahe.apply(sobel)
 
     # Enhance edges in target range
-    target = 10       # Target edge strength
-    delta = 10       # Range around target to enhance
-    strength = 1.0   # Enhancement multiplier
+    target = 10
+    delta = 10
+    strength = 1.0
     
     enhanced = sobel.astype(np.float32)
     diff = enhanced - target
@@ -368,7 +368,48 @@ def create_threshold_mask(image, config):
     enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
     
     save_debug_image(enhanced, "03_enhanced", config['output_dir'])
-    return enhanced
+    
+    # Watershed segmentation on enhanced edges
+    ret, markers = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    markers = cv2.connectedComponents(markers.astype(np.uint8))[1]
+    markers = markers + 1
+    markers[enhanced < 30] = 0
+    
+    # Apply watershed
+    markers = cv2.watershed(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR), markers)
+    watershed_mask = (markers > 1).astype(np.uint8) * 255
+    save_debug_image(watershed_mask, "03a_watershed", config['output_dir'])
+    
+    from skimage.filters import gabor
+    from skimage.filters import threshold_otsu
+    from skimage import img_as_ubyte    
+    
+    # Texture-based segmentation using Gabor filter
+    frequency = 0.6
+    filt_real, filt_imag = gabor(watershed_mask.astype(np.float32) / 255, frequency=frequency)
+    texture_magnitude = np.sqrt(filt_real**2 + filt_imag**2)
+    
+    # Normalize texture magnitude
+    texture_magnitude = img_as_ubyte(texture_magnitude / texture_magnitude.max())
+    
+    # Apply Otsu's threshold to segment based on texture
+    thresh = threshold_otsu(texture_magnitude)
+    texture_mask = (texture_magnitude > thresh).astype(np.uint8) * 255
+    save_debug_image(texture_mask, "06_texture_mask", config['output_dir'])
+    
+    
+    # binary sobel
+    _, binary = cv2.threshold(enhanced, 30, 255, cv2.THRESH_BINARY)
+    
+    # Morphological operations
+    kernel = np.ones((3, 3), np.uint8)
+    dilated = cv2.dilate(binary, kernel, iterations=1)
+    
+    # fill holes
+    filled = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=2)
+    save_debug_image(filled, "05_filled", config['output_dir'])
+    
+    return watershed_mask, filled
 
 def further_downscale_for_sam(image, target_size):
     """
@@ -545,7 +586,7 @@ def segment_image(image, mask_generator, config):
     # Generate masks
     with torch.amp.autocast('cuda'):
         masks = mask_generator.generate(image)
-    # show_masks(image, masks, random_colors=True)
+    show_masks(image, masks, random_colors=True)
     # Remove small segments and combine masks
     min_segment_size = config['segmentation']['min_segment_size']
     combined_mask = remove_small_segments(masks, min_segment_size, image.shape[:2], image, config['segmentation']['pixel_value_threshold'])
@@ -708,19 +749,24 @@ def process_single_file(input_file, output_dir, config, mask_generator):
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
     
+    skip = input("Skip further processing? (y/n): ")
+    if skip.lower() == 'y':
+        return True, downscaled_image, output_profile
+    
     save_debug_image(downscaled_image, f"{unique_id}_02_original", output_dir)
     
     # Apply autumn filter
     image = downscaled_image
     
-    # autum_image = apply_autumn_filter(original_image)
+    image = apply_autumn_filter(image)
     # save_debug_image(autum_image, f"{unique_id}_03_autumn", output_dir)
     # print(f'SHape of autum image: {.shape}')
-    
+    save_debug_image(image, f"{unique_id}_02_original", output_dir)
+
     config["output_dir"] = output_dir
     
     # Threshold mask creation
-    threshold_mask = create_threshold_mask(image, config)
+    threshold_mask, binary_mask = create_threshold_mask(image, config)
     
     # SAM preprocessing
     sam_image = further_downscale_for_sam(threshold_mask, config['segmentation']['sam_target_size'])
