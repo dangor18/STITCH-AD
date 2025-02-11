@@ -26,7 +26,7 @@ class train_dataset(Dataset):
         self.data_path = data_path
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406, 0.485, 0.456], std=[0.229, 0.224, 0.225, 0.229, 0.224])
         #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
         self.transform_fn = transform_fn
         self.p_flip = p_flip
@@ -45,9 +45,9 @@ class train_dataset(Dataset):
         """
             Plot data channels when loading data, used for testing
         """
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axs = plt.subplots(1, 5, figsize=(15, 5))
         fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
+        for i, channel_name in enumerate(['DEM', 'Edge', 'Red', 'Red spec', 'Red Edge']):
             axs[i].set_xlabel('X', size=16)
             axs[i].set_ylabel('Y', size=16)
             axs[i].set_title(f'{channel_name} Channel', size=18)
@@ -150,10 +150,10 @@ class train_dataset(Dataset):
         dem_min = np.percentile(dem, 5)
         dem_max = np.percentile(dem, 95)
         dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-        red = image[:, :, 1]
-        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
-        reg = image[:, :, 2]
-        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
+        red = image[:, :, 4]
+        red = (red - meta["min_vals"][4]) / (meta["max_vals"][4] - meta["min_vals"][4])
+        reg = image[:, :, 5]
+        reg = (reg - meta["min_vals"][5]) / (meta["max_vals"][5] - meta["min_vals"][5])
         grey = image[:, :, 1] / 255
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
@@ -163,7 +163,7 @@ class train_dataset(Dataset):
         reg_na = reg[:, :, np.newaxis]
         sobel_dem_na = sobel_dem[:, :, np.newaxis]
         grey_na = grey[:, :, np.newaxis]
-        normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
+        normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na, red_na, reg_na], axis=2)
         #normal_image = np.concatenate([dem_na, sobel_dem_na, red_na], axis=2)
         normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
         #normal_image = torch.from_numpy(dem).float().unsqueeze(0)
@@ -183,7 +183,7 @@ class train_dataset(Dataset):
         reg_na = reg[:, :, np.newaxis]
         sobel_noise = sobel_noise[:, :, np.newaxis]
 
-        img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
+        img_noise = np.concatenate([dem_na, sobel_noise, grey_na, red_na, reg_na], axis=2)
         #img_noise = np.concatenate([dem_na, sobel_noise, red_na], axis=2)
         img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
         #img_noise = torch.from_numpy(dem_noise).float().unsqueeze(0)    
@@ -228,7 +228,7 @@ class test_dataset(Dataset):
         self.meta_file = meta_file
         self.data_path = data_path
         self.resize_dim = resize_dim
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406, 0.485, 0.456], std=[0.229, 0.224, 0.225, 0.229, 0.224])
         #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
 
         # construct metas
@@ -245,9 +245,9 @@ class test_dataset(Dataset):
         """
             Plot data channels when loading data, used for testing
         """
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axs = plt.subplots(1, 5, figsize=(15, 5))
         fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM', 'Sobel', 'Red']):
+        for i, channel_name in enumerate(['DEM', 'Sobel', 'Red', 'Red spec', 'Red Edge']):
             axs[i].set_xlabel('X', size=16)
             axs[i].set_ylabel('Y', size=16)
             axs[i].set_title(f'{channel_name} Channel', size=18)
@@ -277,10 +277,10 @@ class test_dataset(Dataset):
         grey = rgb / 255
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
-        red = image[:, :, 1]
-        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
-        reg = image[:, :, 2]
-        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
+        red = image[:, :, 4]
+        red = (red - meta["min_vals"][4]) / (meta["max_vals"][4] - meta["min_vals"][4])
+        reg = image[:, :, 5]
+        reg = (reg - meta["min_vals"][5]) / (meta["max_vals"][5] - meta["min_vals"][5])
 
         dem_na = dem[:, :, np.newaxis]
         red = red[:, :, np.newaxis]
@@ -288,7 +288,7 @@ class test_dataset(Dataset):
         sobel_dem = sobel_dem[:, :, np.newaxis]
         #image = np.concatenate([dem, sobel_dem, red], axis=2)
         grey = grey[:, :, np.newaxis]
-        image = np.concatenate([dem_na, sobel_dem, grey], axis=2)
+        image = np.concatenate([dem_na, sobel_dem, grey, red, reg], axis=2)
 
         image = torch.from_numpy(image).float().permute(2, 0, 1)
         #image = torch.from_numpy(dem).float().unsqueeze(0)

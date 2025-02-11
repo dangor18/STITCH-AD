@@ -1,13 +1,13 @@
-data_path: PRE_PROCESS/DATA/PATCHES/DRGB_80_144/
-meta_path_test: PRE_PROCESS/DATA/PATCHES/DRGB_80_144/metadata/test_metadata.json
-meta_path_train: PRE_PROCESS/DATA/PATCHES/DRGB_80_144/metadata/train_metadata.json
-log_path: logs/test.txt
+data_path: PRE_PROCESS/DATA/PATCHES/DRGBRR_80_172/
+meta_path_test: PRE_PROCESS/DATA/PATCHES/DRGBRR_80_172/metadata/test_metadata.json
+meta_path_train: PRE_PROCESS/DATA/PATCHES/DRGBRR_80_172/metadata/train_metadata.json
+log_path: logs/5-channel.txt
 resize_x: 256
 resize_y: 256
 flip: 0.5
-channels: 3
+channels: 5
 
-model_path: checkpoints/RevisitingRDTuned.pth
+model_path: checkpoints/5channeltest.pth
 architecture: "wide_resnet50_2"
 #bn_attention: CBAM
 bn_attention: False
@@ -26,8 +26,8 @@ num_epochs: 50
 batch_size: 32
 proj_lr: 0.001
 distill_lr: 0.005
-proj_lr_factor: 0.25
-distill_lr_factor: 0.25
+proj_lr_factor: 0.5
+distill_lr_factor: 0.5
 beta1_proj: 0.5
 beta2_proj: 0.999
 beta1_distill: 0.5
