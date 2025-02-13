@@ -266,22 +266,23 @@ def load_sam_model(config):
     Returns:
         SamAutomaticMaskGenerator: Initialized SAM mask generator.
     """
-    sam_checkpoint = config['segmentation']['sam_checkpoint']
-    model_type = config['segmentation']['model_type']
+    sam_checkpoint = config['sam_checkpoint']
+    model_type = config['model_type']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
-    if device == 'cuda':
-        sam = sam.half()  # Enable FP16 for better efficiency
+    # if device == 'cuda':
+    #     sam = sam.half()  # Enable FP16 for better efficiency
     
     mask_generator = SamAutomaticMaskGenerator(
         sam,
-        points_per_side=config['segmentation']['points_per_side'],
-        pred_iou_thresh=config['segmentation']['pred_iou_thresh'],
-        stability_score_thresh=config['segmentation']['stability_score_thresh'],
-        box_nms_thresh=config['segmentation']['box_nms_thresh'],
-        crop_nms_thresh=config['segmentation']['crop_nms_thresh']
+        points_per_side=config['points_per_side'],
+        pred_iou_thresh=config['pred_iou_thresh'],
+        stability_score_thresh=config['stability_score_thresh'],
+        box_nms_thresh=config['box_nms_thresh'],
+        crop_nms_thresh=config['crop_nms_thresh'],
+        crop_n_layers=config['crop_n_layers']
     )
     return mask_generator
 
@@ -327,7 +328,6 @@ def create_threshold_mask1(image, config):
 
 def create_threshold_mask(image, config):
     """Edge detection with targeted edge enhancement and watershed segmentation"""
-    image = image.transpose(1, 2, 0)
     img_f = image.astype(np.float32)
     
     # Calculate vegetation indices
@@ -380,36 +380,21 @@ def create_threshold_mask(image, config):
     watershed_mask = (markers > 1).astype(np.uint8) * 255
     save_debug_image(watershed_mask, "03a_watershed", config['output_dir'])
     
-    from skimage.filters import gabor
-    from skimage.filters import threshold_otsu
-    from skimage import img_as_ubyte    
+    # # binary sobel
+    # _, binary = cv2.threshold(enhanced, 30, 255, cv2.THRESH_BINARY)
     
-    # Texture-based segmentation using Gabor filter
-    frequency = 0.6
-    filt_real, filt_imag = gabor(watershed_mask.astype(np.float32) / 255, frequency=frequency)
-    texture_magnitude = np.sqrt(filt_real**2 + filt_imag**2)
+    # # Morphological operations
+    # kernel = np.ones((3, 3), np.uint8)
+    # dilated = cv2.dilate(binary, kernel, iterations=1)
     
-    # Normalize texture magnitude
-    texture_magnitude = img_as_ubyte(texture_magnitude / texture_magnitude.max())
+    # # fill holes
+    # filled = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # save_debug_image(filled, "05_filled", config['output_dir'])
     
-    # Apply Otsu's threshold to segment based on texture
-    thresh = threshold_otsu(texture_magnitude)
-    texture_mask = (texture_magnitude > thresh).astype(np.uint8) * 255
-    save_debug_image(texture_mask, "06_texture_mask", config['output_dir'])
+    #  invert watershed
+    watershed_mask = cv2.bitwise_not(watershed_mask)
     
-    
-    # binary sobel
-    _, binary = cv2.threshold(enhanced, 30, 255, cv2.THRESH_BINARY)
-    
-    # Morphological operations
-    kernel = np.ones((3, 3), np.uint8)
-    dilated = cv2.dilate(binary, kernel, iterations=1)
-    
-    # fill holes
-    filled = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=2)
-    save_debug_image(filled, "05_filled", config['output_dir'])
-    
-    return watershed_mask, filled
+    return watershed_mask, None
 
 def further_downscale_for_sam(image, target_size):
     """
@@ -678,7 +663,6 @@ def apply_autumn_filter(image):
     # Recombine with alpha channel
     result = np.dstack([rgb_result, alpha])
     
-    cv2.imwrite("autumn_image.png", cv2.cvtColor(result, cv2.COLOR_RGBA2BGRA))
     print("Output image shape:", result.shape)
     # Convert to channel-first format
     return result.transpose(2, 0, 1)
@@ -711,7 +695,7 @@ def save_debug_image(image, filename, output_dir):
         print(f'Reduced name: {filename[17:22]+filename[72:]}')
         plt.imsave(os.path.join(debug_dir, f"{filename[17:22]+filename[72:]}.png"), image_to_save)   
     
-def process_single_file(input_file, output_dir, config, mask_generator):
+def process_single_file(input_file, output_dir, config, mask_generator, preprocess=True):
     """
     Process a single input file with debug image saves at key pipeline stages.
 
@@ -748,53 +732,41 @@ def process_single_file(input_file, output_dir, config, mask_generator):
         print("Saving downscaled image...")
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
-    
-    skip = input("Skip further processing? (y/n): ")
-    if skip.lower() == 'y':
-        return True, downscaled_image, output_profile
-    
-    save_debug_image(downscaled_image, f"{unique_id}_02_original", output_dir)
-    
+        
     # Apply autumn filter
     image = downscaled_image
     
+
+    
     image = apply_autumn_filter(image)
-    # save_debug_image(autum_image, f"{unique_id}_03_autumn", output_dir)
-    # print(f'SHape of autum image: {.shape}')
     save_debug_image(image, f"{unique_id}_02_original", output_dir)
 
     config["output_dir"] = output_dir
-    
+
+    print(f'Image shape: {image.shape}')
+
     # Threshold mask creation
-    threshold_mask, binary_mask = create_threshold_mask(image, config)
-    
-    # SAM preprocessing
-    sam_image = further_downscale_for_sam(threshold_mask, config['segmentation']['sam_target_size'])
+    image = image.transpose(1, 2, 0)
+    if preprocess:
+        sam_image, binary_mask = create_threshold_mask(image, config)
+        print(f'Sam shape {sam_image.shape}')
+    else:
+        if sam_image.shape[2] == 4:  # Handle alpha channel
+            sam_image = sam_image[:, :, :3]
+        print(f'Sam shape 11111 {sam_image.shape}')
     
     # Segmentation
     segmentation_mask = segment_image(sam_image, mask_generator, config)
-    
-    # save_debug_image(segmentation_mask.astype(np.uint8)*255, f"{unique_id}_06_segmentation", output_dir)
-    
+        
     print("Segmentation completed.")
        
-    # Mask upscaling
-    upscaled_mask = cv2.resize(segmentation_mask.astype(np.uint8), (image.shape[2], image.shape[1]), 
-                              interpolation=cv2.INTER_NEAREST)
-    
-    print("Upscaling completed.")
-
     # No-data removal
     nodata_value = np.array(config['segmentation']['nodata_value'])    
     max_nodata_percentage = config['segmentation']['max_nodata_percentage']
     border_size = config['segmentation'].get('border_size', 3)
     
-    print("Removing no-data segments...")
-    cleaned_mask = remove_nodata_segments(upscaled_mask, downscaled_image, nodata_value, 
-                                        max_nodata_percentage, border_size, num_threads=12)
-    
-    # save_debug_image(cleaned_mask*255, f"{unique_id}_08_cleaned", output_dir)
-    
+    cleaned_mask = remove_nodata_segments(segmentation_mask, downscaled_image, nodata_value, max_nodata_percentage, border_size, num_threads=12)
+        
     print("No-data removal completed.")
     
     # Dam removal
@@ -803,6 +775,11 @@ def process_single_file(input_file, output_dir, config, mask_generator):
     save_debug_image(final_mask*255, f"{unique_id}_09_no_dams", output_dir)
     
     print("Dam removal completed.")
+    
+    # check if more than 30% of the area is segmented
+    if np.sum(final_mask) / (final_mask.shape[0] * final_mask.shape[1]) < 0.3:
+        print(f"Segmented area is too Small: {np.sum(final_mask)} pixels")
+        return False, downscaled_image, output_profile
     
     # Final mask processing
     final_mask = keep_largest_segment(np.logical_not(final_mask))
@@ -829,7 +806,7 @@ def main(config_file, root_dir):
     target_filename = config.get('input', {}).get('target_filename', 'orthomosaic_visible.tif')
 
     # Load the SAM model
-    mask_generator = load_sam_model(config)
+    mask_generator = load_sam_model(config['segmentation']['thresholded_settings'])
 
     matching_files = []
     for dirpath, dirnames, filenames in os.walk(root_dir):
@@ -840,15 +817,29 @@ def main(config_file, root_dir):
     os.makedirs(os.path.join(output_dir, "orthos"), exist_ok=True)
     os.makedirs(os.path.join(output_dir, "masks"), exist_ok=True)
 
+    reprocess = []
     for input_file in matching_files:
         # try:
-        success, _, _ = process_single_file(input_file, output_dir, config, mask_generator)
+        success, _, _ = process_single_file(input_file, output_dir, config, mask_generator, preprocess=True)
         if success:
             print(f"Successfully processed {input_file}")
         else:
+            reprocess.append(input_file)
             print(f"Failed to process {input_file}")
         # except Exception as e:
         #     print(f"Error processing {input_file}: {str(e)}")
+
+    if len(reprocess) != 0:
+        mask_generator = load_sam_model(config['segmentation']['unprocessed_settings'])
+        
+    for input_file in reprocess:
+        success, _, _ = process_single_file(input_file, output_dir, config, mask_generator, preprocess=False)
+        if success:
+            print(f"Successfully processed {input_file}")
+        else:
+            reprocess.append(input_file)
+            print(f"Failed to process {input_file}")
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orchard Downscaling and Segmentation")
