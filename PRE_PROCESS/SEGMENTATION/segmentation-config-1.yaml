@@ -2,8 +2,8 @@ input:
   target_filename: orthomosaic_visible.tif
 
 downscaling:
-  target_size: [1024, 1024]
-  chunk_size: 1024
+  target_size: [4096, 4096]
+  chunk_size: 4096
   overlap: 128
   num_workers: 10
 
