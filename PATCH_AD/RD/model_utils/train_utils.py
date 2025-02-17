@@ -53,6 +53,7 @@ def get_loaders_proj(params, test=False):
         meta_file=params["meta_path_test"],
         data_path=params["data_path"], 
         resize_dim=(params["resize_x"], params["resize_y"]),
+        in_channels=params.get("channels", 3)
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
     if not test:
@@ -62,14 +63,15 @@ def get_loaders_proj(params, test=False):
             transform_fn=True,
             p_flip=params.get("flip", 0.5),
             resize_dim=(params["resize_x"], params["resize_y"]), 
+            in_channels=params.get("channels", 3)
         )
         train_loader = DataLoader(
             train_data, 
             batch_size=params["batch_size"], 
             shuffle=True,
-            num_workers=4,
-            pin_memory=True,
-            persistent_workers=True,
+            num_workers=params.get("num_workers", 1),
+            pin_memory=params.get("num_works", 1) != 1,
+            persistent_workers=params.get("num_works", 1) != 1,
         )
         
         return train_loader, test_loader
