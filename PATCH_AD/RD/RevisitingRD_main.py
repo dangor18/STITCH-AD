@@ -52,15 +52,15 @@ def train_tuning(params, trial):
                 model.optimizer_proj.zero_grad()
                 model.optimizer_distill.zero_grad()
         
-        total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
+        if epoch > 5:
+            total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
-        if total_auroc > best_auroc:
-            best_auroc = total_auroc
-        
-        model.distill_scheduler.step(metrics=L_distill)
-        model.proj_scheduler.step(metrics=L_proj)
+            if total_auroc > best_auroc:
+                best_auroc = total_auroc
+            
+            model.distill_scheduler.step(metrics=total_auroc)
+            model.proj_scheduler.step(metrics=total_auroc)
 
-        if epoch > 10:
             # prune training if necessary (bad params)
             trial.report(total_auroc, epoch)
             if trial.should_prune():

@@ -70,8 +70,10 @@ def get_loaders_proj(params, test=False):
             batch_size=params["batch_size"], 
             shuffle=True,
             num_workers=params.get("num_workers", 1),
-            pin_memory=params.get("num_works", 1) != 1,
-            persistent_workers=params.get("num_works", 1) != 1,
+            pin_memory=params.get("num_workers", 1) != 1,
+            persistent_workers=params.get("num_workers", 1) != 1,
+            # prefetch factor 1 if workers 1, else 4
+            prefetch_factor=1 if params.get("num_workers", 1) == 1 else 4
         )
         
         return train_loader, test_loader

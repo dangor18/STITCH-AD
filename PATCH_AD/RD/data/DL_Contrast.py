@@ -303,7 +303,7 @@ class test_dataset(Dataset):
 
         input.update({"image": image})
 
-        plot_channels(image, "Artefact Image Channels")
+        #plot_channels(image, "Artefact Image Channels")
         #self.plot_channels(noisy_image, "Noisy Image Channels")
 
         return input
