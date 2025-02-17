@@ -17,14 +17,16 @@ class RevistingRD(torch.nn.Module):
         self.distill_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer_distill, 
             mode='min',
-            patience=params.get("distill_patience", 10),
+            patience=params.get("distill_patience", 5),
             factor=params.get("distill_lr_factor", 0.5),
+            min_lr=1e-6
         )
         self.proj_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer_proj, 
             mode='min',
-            patience=params.get("proj_patience", 10),
+            patience=params.get("proj_patience", 5),
             factor=params.get("proj_lr_factor", 0.5),
+            min_lr=1e-6
         )
 
         self.accumulation_steps = 2
