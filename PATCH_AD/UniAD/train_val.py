@@ -91,7 +91,7 @@ def main():
 
     optimizer = get_optimizer(model.parameters(), config.trainer.optimizer)
     lr_scheduler = get_scheduler(optimizer, config.trainer.lr_scheduler)
-    scaler = GradScaler()
+    scaler = GradScaler(device="cuda")
 
     key_metric = config.evaluator["key_metric"]
     best_metric = 0

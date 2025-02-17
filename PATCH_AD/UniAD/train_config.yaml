@@ -8,17 +8,17 @@ dataset:
   image_reader:
     type: npy
     kwargs:
-      image_dir: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE-PROCESS\DATA\STITCH-O_PATCHES\
+      image_dir: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE_PROCESS\DATA\STITCH-O_PATCHES\
 
   train:
-    meta_file: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE-PROCESS\DATA\STITCH-O_PATCHES\metadata\train_metadata.json
+    meta_file: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE_PROCESS\DATA\STITCH-O_PATCHES\metadata\train_metadata.json
     rebalance: False
     hflip: True
     vflip: True
     rotate: True
 
   test:
-    meta_file: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE-PROCESS\DATA\STITCH-O_PATCHES\metadata\test_metadata.json
+    meta_file: C:\Users\joewh\OneDrive\Desktop\STITCH-AD\PRE_PROCESS\DATA\STITCH-O_PATCHES\metadata\test_metadata.json
 
   input_size: [224,224] # [h,w]
   batch_size: 64
@@ -58,7 +58,7 @@ saver:
   log_dir: UniAD/log/
 
 evaluator:
-  save_dir: result_eval_temp
+  save_dir: result_eval_temp/
   key_metric: mean_mean_auc
   metrics:
     auc:

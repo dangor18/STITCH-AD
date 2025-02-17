@@ -8,5 +8,5 @@ myenv
 *.pth
 *.log
 __pycache__
-PATCH-AD/UniAD/UniAD/*
+PATCH_AD/UniAD/UniAD/*
 *.png
