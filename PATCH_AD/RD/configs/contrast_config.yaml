@@ -1,14 +1,14 @@
 data_path: PRE_PROCESS/DATA/PATCHES/DRGBRRN_80_172/
 meta_path_test: PRE_PROCESS/DATA/PATCHES/DRGBRRN_80_172/metadata/test_metadata.json
 meta_path_train: PRE_PROCESS/DATA/PATCHES/DRGBRRN_80_172/metadata/train_metadata.json
-log_path: logs/6channel-0.9vs0.5.txt
+log_path: logs/6channel.txt
 resize_x: 256
 resize_y: 256
 flip: 0.5
 num_workers: 4
 channels: 6
 
-model_path: checkpoints/asdf.pth
+model_path: checkpoints/6channel.pth
 architecture: "wide_resnet50_2"
 #bn_attention: CBAM
 bn_attention: False
@@ -23,7 +23,7 @@ ssot_weight: 0.015096731092610782
 contrast_weight: 0.9872387127026788
 reconstruct_weight: 0.6513426603306253
 
-num_epochs: 50
+num_epochs: 30
 batch_size: 32
 proj_lr: 0.001
 proj_lr_factor: 0.5
@@ -31,7 +31,7 @@ proj_patience: 5
 distill_lr: 0.005
 distill_lr_factor: 0.5
 distill_patience: 5
-beta1_proj: 0.9
+beta1_proj: 0.5
 beta2_proj: 0.999
-beta1_distill: 0.9
+beta1_distill: 0.5
 beta2_distill: 0.999

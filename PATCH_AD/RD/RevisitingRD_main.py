@@ -52,6 +52,7 @@ def train_tuning(params, trial):
                 model.optimizer_proj.zero_grad()
                 model.optimizer_distill.zero_grad()
         
+        # only start evaluating after 5 epochs (evaluate every epoch)
         if epoch > 5:
             total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
@@ -61,10 +62,11 @@ def train_tuning(params, trial):
             model.distill_scheduler.step(metrics=total_auroc)
             model.proj_scheduler.step(metrics=total_auroc)
 
-            # prune training if necessary (bad params)
-            trial.report(total_auroc, epoch)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
+            if epoch > 10:
+                # prune training if necessary (bad params) after 10 epochs
+                trial.report(total_auroc, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
 
     return best_auroc
 
@@ -116,25 +118,27 @@ def train(params, train_loader, test_loader, device):
         with open(params["log_path"], "a") as log_file:
             log_file.write("\nEPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}".format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss))
         
-        # evaluate model
-        total_auroc, orchard_auroc_dict = evaluate_RD(model, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
-        auroc_dict[epoch+1] = orchard_auroc_dict
-        print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
+        # only start evaluating after 5 epochs (evaluate every epoch)
+        if epoch >= 5:
+            # evaluate model
+            total_auroc, orchard_auroc_dict = evaluate_RD(model, test_loader, device, log_path=params["log_path"], score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))        
+            auroc_dict[epoch+1] = orchard_auroc_dict
+            print('[INFO] EPOCH {}, PROJ LOSS: {:.4f}, DISTILL LOSS:{:.4f}, TOTAL LOSS: {:.4f}, TOTAL AUROC: {:.4F}'.format(epoch, avg_loss_proj, avg_loss_distill, avg_total_loss, total_auroc))
 
-        # save model if improved
-        if total_auroc > best_auroc:
-            best_auroc = total_auroc
-            best_epoch = epoch
-            print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
-            model.save_model(params["model_path"])
-        
-        model.distill_scheduler.step(metrics=total_auroc)
-        model.proj_scheduler.step(metrics=total_auroc)
+            # save model if improved
+            if total_auroc > best_auroc:
+                best_auroc = total_auroc
+                best_epoch = epoch
+                print(f"[INFO] NEW BEST. SAVING MODEL TO {params['model_path']}...")
+                model.save_model(params["model_path"])
+            
+            model.distill_scheduler.step(metrics=total_auroc)
+            model.proj_scheduler.step(metrics=total_auroc)
     
     # test best model after training and plot results
-    #test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
-    #                feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
-    #plot_auroc(auroc_dict)
+    test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+    plot_auroc(auroc_dict)
     return best_auroc, best_epoch
 
 def write_to_file(study, trial):
@@ -150,16 +154,9 @@ def write_to_file(study, trial):
         f.write("\n")
 
 # objective function for optuna
-def objective(trial):
-    parser = ArgumentParser(description="")
-    cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
-    parser.add_argument("--config", default=f"{cwd}/configs/contrast_config.yaml", required=False)
-    parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
-    args = parser.parse_args()
-
-    config = args.config
+def objective(trial, config_path):
     # open config
-    with open(config, "r") as ymlfile:
+    with open(config_path, "r") as ymlfile:
         params = yaml.safe_load(ymlfile)
 
     # objective function params
@@ -186,10 +183,15 @@ def objective(trial):
 if __name__ == '__main__':
     cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
     parser = ArgumentParser(description="")
-    parser.add_argument("--config", default=os.path.join(cwd, "configs/contrast_config.yaml"), required=False)
+    parser.add_argument("--config", "-c", default=os.path.join(cwd, "configs/contrast_config.yaml"), required=False)
+    parser.add_argument("num_trials", type=int, nargs='?', help="Number of trials for hyperparameter tuning")
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
     args = parser.parse_args()
+
+    # check for the case of tuning
+    if args.tune and args.num_trials is None:
+        parser.error("--tune requires num_trials to be specified")
 
     config = os.path.join(cwd, args.config)
 
@@ -214,10 +216,11 @@ if __name__ == '__main__':
         exit()
         
     if args.tune is True:
-        print("[INFO] TUNING HYPERPARAMETERS...")
+        print(f"[INFO] TUNING HYPERPARAMETERS FOR {args.num_trials} TRIALS")
         study = optuna.create_study(direction="maximize")
-        #study.optimize(objective, n_trials=100, callbacks=[write_to_file])
-        study.optimize(objective, n_trials=100)
+        objective_w_params = lambda trial: objective(trial, config)
+        study.optimize(objective_w_params, n_trials=args.num_trials, callbacks=[write_to_file])
+        #study.optimize(objective, n_trials=100)
         print("[INFO] BEST HYPERPARAMETERS:")
         trial = study.best_trial
         for key, val in trial.params.items():

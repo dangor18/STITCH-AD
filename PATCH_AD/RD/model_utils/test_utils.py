@@ -81,40 +81,35 @@ def evaluate_RD(model, data_loader, device, log_path = None, score_weight = 1.0,
     Returns: average_auroc, orchard_auroc_dict
     """
     # average auroc for each orchard
-    orchard_anomaly_score_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": []})     # dict of orchard id anomaly scores for each case and normal patch. Default value supplied if key not found
+    class_anomaly_score_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": []})     # dict of orchard id anomaly scores for each case and normal patch. Default value supplied if key not found
     orchard_auroc_dict = {}
 
     model.eval()
     with torch.no_grad():
         for input in data_loader:
             img = input["image"].to(device)
-            #img = img.squeeze(-1)
-            #label = input["label"].item()   # 0 for normal, 1 for artefact
-            cls_name, case_id = input["clsname"][0], input["case"][0]   # cls_name either "all" or orchard id
-            #print(f"[INFO] CLASS NAME: {cls_name}, CASE NUM: {case_id}")
+            cls_name, case_id = input["clsname"][0], input["case"][0]
 
             inputs, outputs = model(img)
             anomaly_score = cal_anomaly_score(inputs, outputs, score_weight, img.shape[-1], feature_weights)
-            orchard_anomaly_score_dict[cls_name][f"pr_{case_id}"].append(anomaly_score)
+            class_anomaly_score_dict[cls_name][f"pr_{case_id}"].append(anomaly_score)
    
     # calculate AUROC for each case for each orchard
     if log_path :
         with open(log_path, "a") as file:
             file.write("\n=== EVALUATION ===")
     
-    for orchard_id, orchard_data in orchard_anomaly_score_dict.items():
+    for class_id, class_data in class_anomaly_score_dict.items():
         # get stats for each case
-        orchard_score_stats, auroc_case  = get_orchard_stats(orchard_data)
+        orchard_score_stats, auroc_case  = get_orchard_stats(class_data)
 
-        #auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
-        #orchard_auroc_dict[orchard_id] = auroc_total * 100
-        orchard_auroc_dict[orchard_id] = auroc_case * 100
+        orchard_auroc_dict[class_id] = auroc_case * 100
         
         if log_path:
             with open(log_path, "a") as file:
-                    file.write(f"\n-- {orchard_id}, AUROC: {auroc_case}")
-                    file.write(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} STD DEV: {orchard_score_stats['normal'][1]}"+
-                           f"\n++ ARTEFACT MEAN: {orchard_score_stats['artefact'][0]} STD DEV: {orchard_score_stats['artefact'][1]}")
+                file.write(f"\n-- {class_id}, AUROC: {auroc_case}")
+                file.write(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} STD DEV: {orchard_score_stats['normal'][1]}"+
+                    f"\n++ ARTEFACT MEAN: {orchard_score_stats['artefact'][0]} STD DEV: {orchard_score_stats['artefact'][1]}")
 
     # calculate AUROC overall
     average_auroc = sum([x for x in orchard_auroc_dict.values()]) / len(orchard_auroc_dict)
@@ -130,9 +125,9 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
     """
         Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
-    orchard_anomaly_score_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": []})     # dict of orchard id anomaly scores for each case and normal patch. Default value supplied if key not found
-    plot_count = {"1676": {"case_2": 0, "normal": 0}, "1996": {"case_1": 0, "case_2": 0, "normal": 0}, "2057": {"case_1": 0, "case_2": 0, "normal": 0}, "all": {"case_1": 0, "case_2": 0, "normal": 0}}  # dict of orchard id and label count for plotting
-    orchard_patch_results = {"1676": {"score": [], "img": [], "label": []}, "1996": {"score": [], "img": [], "label": []}, "2057": {"score": [], "img": [], "label": []}}
+    class_anomaly_score_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": []})     # dict of orchard id anomaly scores for each case and normal patch. Default value supplied if key not found
+    plot_count = defaultdict(lambda: defaultdict(int))  # dict of orchard id and label count for plotting
+    orchard_patch_results = defaultdict(lambda: {"score": [], "img": [], "label": []})
     orchard_auroc_dict = {}
     # load the best model after training
     model.load_model(model_path)
@@ -142,14 +137,13 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
         for input in data_loader:
             img = input["image"].to(device)
 
-            cls_name, case_id = input["clsname"][0].split('_')[0], input["case"][0]   # cls_name either "all" or orchard id
-            #print(f"[INFO] CLASS NAME: {cls_name}, CASE NUM: {case_id}")
+            cls_name, case_id = input["clsname"][0], input["case"][0]
 
             inputs, outputs = model(img)
             anomaly_score = cal_anomaly_score(inputs, outputs, score_weight, img.shape[-1], feature_weights)
-            orchard_anomaly_score_dict[cls_name][f"pr_{case_id}"].append(anomaly_score)
+            class_anomaly_score_dict[cls_name][f"pr_{case_id}"].append(anomaly_score)
 
-            if not cls_name == "all":
+            if not "all" in cls_name:
                 if plot_count[cls_name][case_id] < n_plot_per_class:
                     plot_count[cls_name][case_id] += 1
                     orchard_patch_results[cls_name]["score"].append(anomaly_score)
@@ -157,30 +151,20 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
                     orchard_patch_results[cls_name]["label"].append(case_id)
     
     print("[INFO] FINAL RESULTS:")
-    for orchard_id, orchard_data in orchard_anomaly_score_dict.items():
+    for orchard_id, orchard_data in class_anomaly_score_dict.items():
         # calc average scores for each case
-        orchard_score_stats, auroc_case1, auroc_case2, auroc_case3  = get_orchard_stats(orchard_data)
-        auroc_total = sum([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None]) / len([x for x in [auroc_case1, auroc_case2, auroc_case3] if x is not None])
-        orchard_auroc_dict[orchard_id] = auroc_total * 100
-        print(f"- ID: {orchard_id}, CASE 1 AUROC: {auroc_case1}, CASE 2 AUROC: {auroc_case2}, CASE 3 AUROC: {auroc_case3} OVERALL: {auroc_total}")
-        print(f"++ NORMAL MEAN: {orchard_score_stats['normal'][0]} STD DEV: {orchard_score_stats['normal'][1]}"+
-                           f"\n++ CASE 1 MEAN: {orchard_score_stats['case_1'][0]} STD DEV: {orchard_score_stats['case_1'][1]}" +
-                           f"\n++ CASE 2 MEAN: {orchard_score_stats['case_2'][0]} STD DEV: {orchard_score_stats['case_2'][1]}" +
-                           f"\n++ CASE 3 MEAN: {orchard_score_stats['case_3'][0]} STD DEV: {orchard_score_stats['case_3'][1]}")
+        orchard_score_stats, auroc_case  = get_orchard_stats(orchard_data)
+        orchard_auroc_dict[orchard_id] = auroc_case * 100
+        print(f"\n-- {orchard_id}, AUROC: {auroc_case}")
+        print(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} \tSTD DEV: {orchard_score_stats['normal'][1]}"+
+                f"\n++ ARTEFACT MEAN: {orchard_score_stats['artefact'][0]}\tSTD DEV: {orchard_score_stats['artefact'][1]}")
         
-        plot_histogram(orchard_data["pr_case_1"], orchard_data["pr_case_2"], orchard_data["pr_case_3"], orchard_data["pr_normal"], orchard_id)
+        #plot_histogram(orchard_data["pr_case_1"], orchard_data["pr_case_2"], orchard_data["pr_case_3"], orchard_data["pr_normal"], orchard_id)
 
-        fig, ax = plt.subplots()
-        if auroc_case1:
-            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_1"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case_1"], name="CASE 1 PRECISION RECALL", ax=ax)
-        if auroc_case2:
-            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_2"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case_2"], name="CASE 2 PRECISION RECALL", ax=ax)
-        if auroc_case3:
-            PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_3"]))],
-                                                        orchard_data["pr_normal"] + orchard_data["pr_case_3"], name="CASE 3 PRECISION RECALL", ax=ax)
-        plt.show()
+        #fig, ax = plt.subplots()
+        #PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_1"]))],
+        #                                        orchard_data["pr_normal"] + orchard_data["pr_case_1"], name="CASE 1 PRECISION RECALL", ax=ax)
+        #plt.show()
         if not orchard_id == "all":        
             for i in range(len(orchard_patch_results[orchard_id]["img"])):
                 plot_sample(orchard_patch_results[orchard_id]["img"][i], orchard_patch_results[orchard_id]["label"][i], orchard_patch_results[orchard_id]["score"][i], orchard_id)

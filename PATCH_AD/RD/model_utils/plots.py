@@ -2,31 +2,57 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
+def plot_channels(image, title):
+    """
+        Plot data channels when loading data, used for testing
+    """
+    channel_names = ['DEM', 'Edge', 'Red', 'Red spec', 'Red Edge', 'nir']
+    # number of plots for each channel
+    n = image.shape[0]
+    fig, axs = plt.subplots(1, n, figsize=(15, 5))
+    fig.suptitle(title, size=20)
+    for i in range(n):
+        axs[i].set_xlabel('X', size=16)
+        axs[i].set_ylabel('Y', size=16)
+        axs[i].set_title(f'{channel_names[i]} Channel', size=18)
+        axs[i].axis('off')
+        if i == 0:
+            plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
+        else:
+            plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
+    plt.tight_layout()
+    plt.show()
+
 def plot_sample(image, label, anomaly_score, orchard_id):
     """
         Plot each channel of an image, with label and anomaly score for a given orchard
     """
-    if label == 0:
+    if label == "normal":
         color = 'green'
     else:
         color = 'red'
-    fig, axs = plt.subplots(1, 4, figsize=(15, 5))
-    # remove batch dimension
-    image = torch.squeeze(image, 0)
-    #print(np.shape(image))
-    plt.title(f"ORCHARD ID: {orchard_id}")
-    for i, channel_name in enumerate(['dem', 'edge', 'red']):
-        img = image[i].cpu().numpy()
-        if channel_name == "dem":
-            axs[i].imshow(image[i].cpu().numpy(), cmap='viridis')
-        else:
-            axs[i].imshow(image[i].cpu().numpy(), cmap='gray')
-        axs[i].set_title(f'{channel_name} Channel')
+    channel_names = ['DEM', 'Edge', 'Red', 'Red spec', 'Red Edge', 'nir']
+    image = image.cpu().numpy().squeeze()
+    # number of plots for each channel
+    n = image.shape[0]
+    fig, axs = plt.subplots(1, n+1, figsize=(24, 6))
+    fig.suptitle(f"CLASS ID {orchard_id}", size=20)
+
+    for i in range(n):
+        axs[i].set_xlabel('X', size=16)
+        axs[i].set_ylabel('Y', size=16)
+        axs[i].set_title(f'{channel_names[i]} Channel', size=18, pad=10)
         axs[i].axis('off')
+
+        channel_data = image[i]
+        if i == 0:
+            plt.colorbar(axs[i].imshow(channel_data, cmap='viridis'), ax=axs[i], label='Value')
+        else:
+            plt.colorbar(axs[i].imshow(channel_data, cmap='gray'), ax=axs[i], label='Value')
     
-    axs[3].axis('off')
-    axs[3].text(0.5, 0.6, f"LABEL: {get_class_name(label)}", ha='center', va='center', fontsize=14)
-    axs[3].text(0.5, 0.4, f"ANOMALY SCORE: {anomaly_score:.4f}", ha='center', va='center', fontsize=18, color=color)
+    axs[-1].axis('off')
+    axs[-1].text(0.5, 0.6, f"LABEL: {label}", ha='center', va='center', fontsize=14)
+    axs[-1].text(0.5, 0.4, f"ANOMALY SCORE: {anomaly_score:.4f}", ha='center', va='center', fontsize=18, color=color)
 
     plt.tight_layout()
     plt.show()
