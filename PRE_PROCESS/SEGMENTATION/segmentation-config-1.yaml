@@ -9,13 +9,13 @@ downscaling:
 
 segmentation:
   pixel_value_threshold: 0.3
-  min_segment_size: 0.01
+  min_segment_size: 0.005
   thresholded_settings:
     sam_checkpoint: "PRE_PROCESS/SEGMENTATION/sam_vit_b_01ec64.pth"
     model_type: "vit_b"
     points_per_side: 32
-    pred_iou_thresh: 0.077
-    stability_score_thresh: 0.88
+    pred_iou_thresh: 0.08
+    stability_score_thresh: 0.85
     box_nms_thresh: 0.4
     crop_nms_thresh: 0.4
     crop_n_layers: 0
@@ -38,3 +38,8 @@ segmentation:
     upper_green: [80, 245, 200]
   morphology:
     kernel_size: 7
+  
+show_masks: False
+skip_enabled: False
+seed: 42
+save_debug: True

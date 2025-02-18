@@ -266,7 +266,17 @@ def load_sam_model(config):
     Returns:
         SamAutomaticMaskGenerator: Initialized SAM mask generator.
     """
-    seed = 42
+    # Set seeds for reproducibility 
+    seed = config.get('seed', 42)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        
     sam_checkpoint = config['sam_checkpoint']
     model_type = config['model_type']
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -286,46 +296,6 @@ def load_sam_model(config):
         crop_n_layers=config['crop_n_layers']
     )
     return mask_generator
-
-def create_threshold_mask1(image, config):
-   """Apply preprocessing with final binary thresholding"""
-   image = image.transpose(1, 2, 0)
-   img_f = image.astype(np.float32)
-   
-   # Calculate vegetation indices
-   ratio = 255 * (img_f[:,:,1] / (img_f[:,:,0] + 1))
-   shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
-   seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
-
-   # Normalize and enhance
-   ratio = cv2.normalize(ratio, None, 0, 255, cv2.NORM_MINMAX)
-   shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
-   seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
-   
-   clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-   ratio = clahe.apply(ratio.astype(np.uint8))
-   shadow = clahe.apply(shadow.astype(np.uint8))
-   seasonal = clahe.apply(seasonal.astype(np.uint8))
-
-   # Combine channels
-   enhanced = np.dstack([ratio, shadow, seasonal])
-   enhanced = cv2.normalize(enhanced, None, 0, 255, cv2.NORM_MINMAX)
-   
-   # save debug
-   save_debug_image(enhanced, "01_enhanced", config['output_dir'])
-   
-   # Convert to HSV for final thresholding
-   hsv = cv2.cvtColor(enhanced.astype(np.uint8), cv2.COLOR_RGB2HSV)
-   
-   # Apply binary threshold with tuned values
-   lower = np.array([80, 180, 60])   # Cyan-green hue, moderate saturation/value minimums
-   upper = np.array([85, 255, 255])  # Blue-green hue, max saturation/value
-   mask = cv2.inRange(hsv, lower, upper)
-   
-#    kernel = np.ones((3,3), np.uint8)
-#    mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=1)
-   
-   return mask
 
 def create_threshold_mask(image, config):
     """Edge detection with targeted edge enhancement and watershed segmentation"""
@@ -381,18 +351,7 @@ def create_threshold_mask(image, config):
     watershed_mask = (markers > 1).astype(np.uint8) * 255
     save_debug_image(watershed_mask, "03a_watershed", config['output_dir'])
         
-    # # binary sobel
-    # _, binary = cv2.threshold(enhanced, 30, 255, cv2.THRESH_BINARY)
-    
-    # # Morphological operations
-    # kernel = np.ones((3, 3), np.uint8)
-    # dilated = cv2.dilate(binary, kernel, iterations=1)
-    
-    # # fill holes
-    # filled = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, kernel, iterations=2)
-    # save_debug_image(filled, "05_filled", config['output_dir'])
-        
-    return watershed_mask, None
+    return watershed_mask
 
 def scale_for_sam(image, target_size):
     """
@@ -418,7 +377,7 @@ def scale_for_sam(image, target_size):
     
     return cv2.resize(image, new_size, interpolation=cv2.INTER_LINEAR if scale > 1 else cv2.INTER_AREA)
 
-def remove_small_segments(masks, min_size, image_shape, image, pixel_value_threshold):
+def remove_small_segments(masks, min_size, image_shape, image, pixel_value_threshold, min_segment_size):
     """
     Remove small segments from multiple masks and combine them.
 
@@ -438,19 +397,17 @@ def remove_small_segments(masks, min_size, image_shape, image, pixel_value_thres
     valid_segments = []
     for mask in masks[1:]:
         segment = mask['segmentation']
-        if (np.sum(segment)/total_pixels >= min_size) or (np.sum(segment) >= 1000):
+        if (np.sum(segment)/total_pixels >= min_size):
             segmented_pixels = image[segment]
             avg_pixel_value = np.mean(segmented_pixels)/255
             num_pixels = np.sum(segment)
-            if (avg_pixel_value >= pixel_value_threshold) or num_pixels/total_pixels >= 0.01:
+            if (avg_pixel_value >= pixel_value_threshold) or 0.8 >= num_pixels/total_pixels >= min_segment_size:
                 valid_segments.append(segment)
+            print(f'Average pixel value: {avg_pixel_value}, Pixel Percent = {100*num_pixels/total_pixels}%')
 
-    # Now erode each valid segment and add to combined mask
-    kernel = np.ones((5, 5), np.uint8)  # Increased kernel size for more separation
+    kernel = np.ones((5, 5), np.uint8)
     for segment in valid_segments:
-        # Erode more aggressively to ensure separation
         eroded = cv2.erode(segment.astype(np.uint8), kernel, iterations=2)
-        # Add to combined mask - segments will remain separate due to erosion
         combined_mask = np.logical_or(combined_mask, eroded.astype(bool))
     
     return combined_mask
@@ -577,10 +534,11 @@ def segment_image(image, mask_generator, config):
     # Generate masks
     with torch.amp.autocast('cuda'):
         masks = mask_generator.generate(image)
-    show_masks(image, masks, random_colors=True)
+    if config.get('show_masks', False):
+        show_masks(image, masks, random_colors=True)
     # Remove small segments and combine masks
     min_segment_size = config['segmentation']['min_segment_size']
-    combined_mask = remove_small_segments(masks, min_segment_size, image.shape[:2], image, config['segmentation']['pixel_value_threshold'])
+    combined_mask = remove_small_segments(masks, min_segment_size, image.shape[:2], image, config['segmentation']['pixel_value_threshold'], config['segmentation']['min_segment_size'])
     
     combined_mask = scale_for_sam(combined_mask, size)
     return combined_mask
@@ -739,34 +697,36 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
         
+    if config.get('skip_enabled', False):
+        skip = input("Skip segmentation? (y/n): ")
+        if skip.lower() == 'y':
+            return False, downscaled_image, output_profile
+        
+    save_debugs = config.get('save_debug', False)
     # Apply autumn filter
     image = downscaled_image
     
     image = apply_autumn_filter(image)
-    save_debug_image(image, f"{unique_id}_02_original", output_dir)
+    if save_debugs:
+        save_debug_image(image, f"{unique_id}_02_original", output_dir)
 
     config["output_dir"] = output_dir
-
-    print(f'Image shape: {image.shape}')
 
     # Threshold mask creation
     image = image.transpose(1, 2, 0)
     if preprocess:
-        sam_image, binary_mask = create_threshold_mask(image, config)
-        # Scale 2D mask
+        sam_image = create_threshold_mask(image, config)
     else:
-        if image.shape[2] == 4:  # Handle alpha channel
+        if image.shape[2] == 4:
             sam_image = image[:, :, :3]
     
     
     # Segmentation
     segmentation_mask = segment_image(sam_image, mask_generator, config)
-    
-    print(f"Segmentation mask shape: {segmentation_mask.shape}")
-    print(f"Image shape (used on mask cleaning): {image.shape}")
-
         
     print("Segmentation completed.")
+    if save_debugs:
+        save_debug_image(segmentation_mask*255, f"{unique_id}_03_segmentation_mask", output_dir)
        
     # No-data removal
     nodata_value = np.array(config['segmentation']['nodata_value'])    
@@ -776,11 +736,14 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     cleaned_mask = remove_nodata_segments(segmentation_mask, image, nodata_value, max_nodata_percentage, border_size, num_threads=12)
         
     print("No-data removal completed.")
+    if save_debugs:
+        save_debug_image(cleaned_mask*255, f"{unique_id}_04_no_data_cleaned_mask", output_dir)
     
     # Dam removal
     outlier_threshold = config['segmentation']['outlier_threshold']
     final_mask = detect_and_remove_dams(cleaned_mask, image, outlier_threshold)
-    save_debug_image(final_mask*255, f"{unique_id}_09_no_dams", output_dir)
+    if save_debugs:
+        save_debug_image(final_mask*255, f"{unique_id}_Final", output_dir)
     
     print("Dam removal completed.")
     
@@ -845,7 +808,6 @@ def main(config_file, root_dir):
         if success:
             print(f"Successfully processed {input_file}")
         else:
-            reprocess.append(input_file)
             print(f"Failed to process {input_file}")
         
 
