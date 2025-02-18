@@ -12,6 +12,27 @@ from data.noise import Simplex_CLASS
 from torchvision import transforms
 import json
 import random
+
+def plot_channels(image, title):
+    """
+        Plot data channels when loading data, used for testing
+    """
+    channel_names = ['DEM', 'Edge', 'Red', 'Red spec', 'Red Edge', 'nir']
+    # number of plots for each channel
+    n = image.shape[0]
+    fig, axs = plt.subplots(1, n, figsize=(15, 5))
+    fig.suptitle(title, size=20)
+    for i in range(n):
+        axs[i].set_xlabel('X', size=16)
+        axs[i].set_ylabel('Y', size=16)
+        axs[i].set_title(f'{channel_names[i]} Channel', size=18)
+        axs[i].axis('off')
+        if i == 0:
+            plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
+        else:
+            plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
+    plt.tight_layout()
+    plt.show()
     
 class train_dataset(Dataset):
     def __init__(
@@ -21,13 +42,21 @@ class train_dataset(Dataset):
         resize_dim=(256, 256),
         transform_fn=None,
         p_flip=0.5,
+        in_channels=3,
     ):
         self.meta_file = meta_file
         self.data_path = data_path
         self.resize_dim = resize_dim
         self.simplexNoise = Simplex_CLASS()
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
+
+        imagenet_mean = [0.485, 0.456, 0.406]
+        imagenet_std = [0.229, 0.224, 0.225]
+        self.in_channels = in_channels
+
+        # repeat above norms and std for each in channel
+        mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
+        std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
+        self.normalize = transforms.Normalize(mean=mean, std=std)
         self.transform_fn = transform_fn
         self.p_flip = p_flip
         
@@ -40,24 +69,6 @@ class train_dataset(Dataset):
 
     def __len__(self):
         return len(self.metas)
-    
-    def plot_channels(self, image, title):
-        """
-            Plot data channels when loading data, used for testing
-        """
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM', 'Edge', 'Red']):
-            axs[i].set_xlabel('X', size=16)
-            axs[i].set_ylabel('Y', size=16)
-            axs[i].set_title(f'{channel_name} Channel', size=18)
-            axs[i].axis('off')
-            if i == 0:
-                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
-            else:
-                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
-        plt.tight_layout()
-        plt.show()
 
     def get_psuedo_case1(self, dem, seed=None):
         """
@@ -145,28 +156,26 @@ class train_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # get normal data
+        # remove the green and blue channels from the RGB (3rd and 4th channels in image)
+        image = np.concatenate((image[:, :, 0:2], image[:, :, 4:]), axis=2)
+
+        # get dem, scale and create sobel dem
         dem = image[:, :, 0]
-        dem_min = np.percentile(dem, 5)
-        dem_max = np.percentile(dem, 95)
-        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-        red = image[:, :, 1]
-        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
-        reg = image[:, :, 2]
-        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
-        grey = image[:, :, 1] / 255
+        dem_min = np.percentile(dem, 1)
+        dem_max = np.percentile(dem, 99)
+        # scale dem in image
+        image[:, :, 0] = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        # insert sobel after dem in image
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
+        
+        image = np.concatenate([image[:, :, 0:1], sobel_dem[:, :, np.newaxis], image[:, :, 1:]], axis=2)
+        image[:, :, 2] = image[:, :, 2] / 255
 
-        dem_na= dem[:, :, np.newaxis]
-        red_na = red[:, :, np.newaxis]
-        reg_na = reg[:, :, np.newaxis]
-        sobel_dem_na = sobel_dem[:, :, np.newaxis]
-        grey_na = grey[:, :, np.newaxis]
-        normal_image = np.concatenate([dem_na, sobel_dem_na, grey_na], axis=2)
-        #normal_image = np.concatenate([dem_na, sobel_dem_na, red_na], axis=2)
-        normal_image = torch.from_numpy(normal_image).float().permute(2, 0, 1)
-        #normal_image = torch.from_numpy(dem).float().unsqueeze(0)
+        for i in range(3, self.in_channels):
+            image[:, :, i] = (image[:, :, i] - meta["min_vals"][i+1]) / (meta["max_vals"][i+1] - meta["min_vals"][i+1])
+
+        normal_image = torch.from_numpy(image).float().permute(2, 0, 1)
         
         # randomly choose either case 1 or 2 psuedo-artefact
         choice = random.choice([1, 2])
@@ -175,18 +184,13 @@ class train_dataset(Dataset):
         elif choice == 2:
             dem_noise = self.get_psuedo_case2(dem, amplitude=0.7)
 
+        image_noise = image.copy()
         sobel_noise = ndimage.sobel(dem_noise)
         sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
-        dem_na = dem_noise[:, :, np.newaxis]
-        #grey_na = grey[:, :, np.newaxis]
-        red_na = red[:, :, np.newaxis]
-        reg_na = reg[:, :, np.newaxis]
-        sobel_noise = sobel_noise[:, :, np.newaxis]
+        image_noise[:, :, 0] = dem_noise
+        image_noise[:, :, 1] = sobel_noise
 
-        img_noise = np.concatenate([dem_na, sobel_noise, grey_na], axis=2)
-        #img_noise = np.concatenate([dem_na, sobel_noise, red_na], axis=2)
-        img_noise = torch.from_numpy(img_noise).float().permute(2, 0, 1)
-        #img_noise = torch.from_numpy(dem_noise).float().unsqueeze(0)    
+        img_noise = torch.from_numpy(image_noise).float().permute(2, 0, 1)
         
         # apply flips
         if self.transform_fn:
@@ -213,8 +217,8 @@ class train_dataset(Dataset):
 
         #print(normal_image)
         #print(img_noise)
-        #self.plot_channels(normal_image, "Normal Image Channels")
-        #self.plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
+        #plot_channels(normal_image, "Normal Image Channels")
+        #plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
 
         return input
     
@@ -224,12 +228,19 @@ class test_dataset(Dataset):
         meta_file,
         data_path,
         resize_dim=(256, 256),
+        in_channels=3,
     ):
         self.meta_file = meta_file
         self.data_path = data_path
         self.resize_dim = resize_dim
-        self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        #self.normalize = transforms.Normalize(mean=[0.485], std=[0.229])
+        imagenet_mean = [0.485, 0.456, 0.406]
+        imagenet_std = [0.229, 0.224, 0.225]
+        self.in_channels = in_channels
+
+        # repeat above norms and std for each in channel
+        mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
+        std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
+        self.normalize = transforms.Normalize(mean=mean, std=std)
 
         # construct metas
         with open(meta_file, "r") as f_r:
@@ -240,24 +251,6 @@ class test_dataset(Dataset):
 
     def __len__(self):
         return len(self.metas)
-    
-    def plot_channels(self, image, title):
-        """
-            Plot data channels when loading data, used for testing
-        """
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(title, size=20)
-        for i, channel_name in enumerate(['DEM', 'Sobel', 'Red']):
-            axs[i].set_xlabel('X', size=16)
-            axs[i].set_ylabel('Y', size=16)
-            axs[i].set_title(f'{channel_name} Channel', size=18)
-            axs[i].axis('off')
-            if i == 0:
-                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='viridis'), ax=axs[i], label='Value')
-            else:
-                plt.colorbar(axs[i].imshow(image[i].numpy(), cmap='gray'), ax=axs[i], label='Value')
-        plt.tight_layout()
-        plt.show()
 
     def __getitem__(self, index):
         input = {}
@@ -269,29 +262,26 @@ class test_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
+        # remove the green and blue channels from the RGB (3rd and 4th channels in image)
+        image = np.concatenate((image[:, :, 0:2], image[:, :, 4:]), axis=2)
+
+        # get dem, scale and create sobel dem
         dem = image[:, :, 0]
-        dem_min = np.percentile(dem, 5)
-        dem_max = np.percentile(dem, 95)
-        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
-        rgb = image[:, :, 1]
-        grey = rgb / 255
+        dem_min = np.percentile(dem, 1)
+        dem_max = np.percentile(dem, 99)
+        # scale dem in image
+        image[:, :, 0] = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        # insert sobel after dem in image
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
-        red = image[:, :, 1]
-        red = (red - meta["min_vals"][1]) / (meta["max_vals"][1] - meta["min_vals"][1])
-        reg = image[:, :, 2]
-        reg = (reg - meta["min_vals"][2]) / (meta["max_vals"][2] - meta["min_vals"][2])
+        
+        image = np.concatenate([image[:, :, 0:1], sobel_dem[:, :, np.newaxis], image[:, :, 1:]], axis=2)
+        image[:, :, 2] = image[:, :, 2] / 255
 
-        dem_na = dem[:, :, np.newaxis]
-        red = red[:, :, np.newaxis]
-        reg = reg[:, :, np.newaxis]
-        sobel_dem = sobel_dem[:, :, np.newaxis]
-        #image = np.concatenate([dem, sobel_dem, red], axis=2)
-        grey = grey[:, :, np.newaxis]
-        image = np.concatenate([dem_na, sobel_dem, grey], axis=2)
+        for i in range(3, self.in_channels):
+            image[:, :, i] = (image[:, :, i] - meta["min_vals"][i+1]) / (meta["max_vals"][i+1] - meta["min_vals"][i+1])
 
         image = torch.from_numpy(image).float().permute(2, 0, 1)
-        #image = torch.from_numpy(dem).float().unsqueeze(0)
 
         input.update(
             {
@@ -313,7 +303,7 @@ class test_dataset(Dataset):
 
         input.update({"image": image})
 
-        #self.plot_channels(image, "Artefact Image Channels")
+        #plot_channels(image, "Artefact Image Channels")
         #self.plot_channels(noisy_image, "Noisy Image Channels")
 
         return input

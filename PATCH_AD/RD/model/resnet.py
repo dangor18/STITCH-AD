@@ -356,8 +356,23 @@ def _resnet(
         if in_channels == 1:
             original_conv1_weight = state_dict['conv1.weight']
             new_conv1_weight = original_conv1_weight.sum(dim=1, keepdim=True)
-            new_conv1_weight = new_conv1_weight / 3.0  # Average the channels
+            new_conv1_weight = new_conv1_weight / 3.0  # average the channels
         
+            state_dict['conv1.weight'] = new_conv1_weight
+            
+        if in_channels > 3:
+            # for >3 channels, repeat the RGB weights
+            repeats = in_channels // 3
+            remainder = in_channels % 3
+
+            original_conv1_weight = state_dict['conv1.weight']
+            new_conv1_weight = original_conv1_weight.repeat(1, repeats, 1, 1)
+                
+            if remainder > 0:
+                # Add the remaining channels from the beginning of RGB
+                remainder_weights = original_conv1_weight[:, :remainder, :, :]
+                new_conv1_weight = torch.cat([new_conv1_weight, remainder_weights], dim=1)
+            
             state_dict['conv1.weight'] = new_conv1_weight
         #for k,v in list(state_dict.items()):
         #    if 'layer4' in k or 'fc' in k:
