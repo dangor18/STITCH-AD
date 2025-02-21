@@ -12,6 +12,7 @@ from torchvision import transforms
 import json
 from torch import from_numpy
 from sklearn.model_selection import train_test_split
+from scipy import ndimage
 
 class StitchoDataset(Dataset):
     def __init__(
@@ -67,6 +68,11 @@ class StitchoDataset(Dataset):
 
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
+
+        # add extra sobel-filtered layer
+        sobel = ndimage.sobel(image[:, :, 0])
+        sobel = np.expand_dims(sobel, axis=2)
+        image = np.concatenate((image, sobel), axis=2)
 
         # scale layers to 0-1
         for i in range(image.shape[2]):
