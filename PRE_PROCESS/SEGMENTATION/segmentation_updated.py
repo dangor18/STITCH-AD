@@ -1,547 +1,180 @@
+# Standard library
 import os
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import time
+from datetime import datetime
+
+# Third-party libraries
 import cv2
 import numpy as np
 import rasterio
-from rasterio.enums import Resampling
-from rasterio.windows import Window
 import yaml
-import argparse
-from concurrent.futures import ProcessPoolExecutor
-import multiprocessing
 import torch
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
 from scipy import ndimage, stats
-import concurrent.futures
-from matplotlib import pyplot as plt
-import random
 
-def load_config(config_path):
-    """
-    Load configuration from a YAML file.
+# Local imports
+from segmentation_utils import (
+    scale_for_sam, 
+    downscale_tif, 
+    load_sam_model, 
+    show_masks, 
+    apply_autumn_filter, 
+    save_debug_image
+)
 
-    Args:
-        config_path (str): Path to the YAML configuration file.
-
-    Returns:
-        dict: Loaded configuration as a dictionary.
-    """
-    with open(config_path, 'r') as f:
+def load_config(config_path: str) -> dict:
+    """Load configuration from YAML file."""
+    with open(config_path) as f:
         return yaml.safe_load(f)
 
-try:
-    import torch
-    import torch.nn.functional as F
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
-def create_blend_mask(height, width, overlap=32, device=None):
-    """
-    Create a blending mask for smooth transitions between chunks
-    
-    Args:
-        height (int): Height of mask
-        width (int): Width of mask 
-        overlap (int): Overlap size in pixels
-        device: torch device if using GPU
-    """
-    if device is not None:
-        mask = torch.ones((height, width), device=device)
-    else:
-        mask = np.ones((height, width))
-    
-    for i in range(overlap):
-        factor = i / overlap
-        mask[:, i] *= factor
-        mask[:, -(i+1)] *= factor
-        mask[i, :] *= factor 
-        mask[-(i+1), :] *= factor
-    return mask
-
-def read_and_resample_block(input_file, window_data, scale_factor, overlap):
-    """
-    Read and resample a block with proper blending mask
-    """
-    with rasterio.open(input_file) as src:
-        col_off, row_off, width, height = window_data
-        
-        # Create expanded window with overlap
-        expanded_window = Window(
-            max(0, col_off - overlap),
-            max(0, row_off - overlap), 
-            min(src.width - col_off + overlap, width + 2*overlap),
-            min(src.height - row_off + overlap, height + 2*overlap)
-        )
-        
-        data = src.read(window=expanded_window)
-        out_height = int(expanded_window.height * scale_factor)
-        out_width = int(expanded_window.width * scale_factor)
-        
-        resampled = np.zeros((data.shape[0], out_height, out_width), dtype=np.float32)
-        
-        # Resample each band
-        for i in range(data.shape[0]):
-            resampled[i] = src.read(
-                i + 1,
-                out_shape=(out_height, out_width),
-                window=expanded_window,
-                resampling=Resampling.lanczos
-            )
-        
-        # Create and apply blend mask
-        blend_mask = create_blend_mask(out_height, out_width, int(overlap * scale_factor))
-        resampled *= blend_mask
-        
-        # Calculate valid region
-        resampled_overlap = int(overlap * scale_factor)
-        start_row = resampled_overlap if row_off > 0 else 0 
-        start_col = resampled_overlap if col_off > 0 else 0
-        end_row = out_height - resampled_overlap if row_off + height < src.height else out_height
-        end_col = out_width - resampled_overlap if col_off + width < src.width else out_width
-        
-        clipped = resampled[:, start_row:end_row, start_col:end_col]
-        
-        return clipped, (col_off, row_off, width, height)
-
-def downscale_tif(input_file, config):
-    """
-    Downscale TIF using CPU or GPU based on availability
-    """
-    if TORCH_AVAILABLE and torch.cuda.is_available():
-        return downscale_tif_gpu(input_file, config)
-    else:
-        return downscale_tif_cpu(input_file, config)
-
-def downscale_tif_cpu(input_file, config):
-    """
-    CPU implementation of TIF downscaling
-    """
-    target_size = tuple(config['downscaling']['target_size'])
-    chunk_size = config['downscaling']['chunk_size']
-    overlap = config['downscaling'].get('overlap', 128)
-    
-    with rasterio.open(input_file) as src:
-        scale_factor = min(target_size[0] / src.height, target_size[1] / src.width)
-        output_height = int(src.height * scale_factor)
-        output_width = int(src.width * scale_factor)
-        
-        output_profile = src.profile.copy()
-        output_profile.update({
-            'height': output_height,
-            'width': output_width,
-            'transform': src.transform * src.transform.scale(
-                (src.width / output_width),
-                (src.height / output_height)
-            )
-        })
-        
-        # Initialize output arrays
-        final_sum = np.zeros((src.count, output_height, output_width), dtype=np.float32)
-        weights_sum = np.zeros((output_height, output_width), dtype=np.float32)
-        
-        # Create processing windows
-        windows = [
-            (col, row, min(chunk_size, src.width - col), min(chunk_size, src.height - row))
-            for row in range(0, src.height, chunk_size-2*overlap)
-            for col in range(0, src.width, chunk_size-2*overlap)
-        ]
-        
-        num_workers = min(config['downscaling']['num_workers'], 
-                         multiprocessing.cpu_count())
-        
-        # Process chunks in parallel
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = [
-                executor.submit(read_and_resample_block, input_file, window, scale_factor, overlap) 
-                for window in windows
-            ]
-            
-            for future in futures:
-                resampled, window_data = future.result()
-                
-                # Calculate output coordinates
-                out_y = int(window_data[1] * scale_factor)
-                out_x = int(window_data[0] * scale_factor)
-                
-                # Add to final arrays
-                h, w = resampled.shape[1:]
-                final_sum[:, out_y:out_y+h, out_x:out_x+w] += resampled
-                weights_sum[out_y:out_y+h, out_x:out_x+w] += 1
-        
-        # Normalize and clip final image
-        weights_sum = np.maximum(weights_sum, 1e-10)
-        downscaled_image = np.clip(
-            final_sum / weights_sum[np.newaxis, :, :],
-            0, 255
-        ).astype(np.uint8)
-        
-        return downscaled_image, output_profile
-
-def downscale_tif_gpu(input_file, config):
-    """
-    GPU implementation of TIF downscaling
-    """
-    target_size = tuple(config['downscaling']['target_size'])
-    overlap = config['downscaling'].get('overlap', 128)
-    device = torch.device('cuda')
-    
-    with rasterio.open(input_file) as src:
-        scale_factor = min(target_size[0] / src.height, target_size[1] / src.width)
-        output_height = int(src.height * scale_factor)
-        output_width = int(src.width * scale_factor)
-        
-        output_profile = src.profile.copy()
-        output_profile.update({
-            'height': output_height,
-            'width': output_width,
-            'transform': src.transform * src.transform.scale(
-                (src.width / output_width),
-                (src.height / output_height)
-            )
-        })
-        
-        # Calculate memory-efficient strip size
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory
-        available_memory = int(gpu_memory * 0.8)  # Use 80% of GPU memory
-        bytes_per_pixel = 4  # float32
-        row_memory = src.width * src.count * bytes_per_pixel
-        max_rows = min(int(available_memory / row_memory), src.height)
-        
-        # Initialize output tensors
-        final_sum = torch.zeros((src.count, output_height, output_width), 
-                              dtype=torch.float32, device=device)
-        weights_sum = torch.zeros((output_height, output_width), 
-                                dtype=torch.float32, device=device)
-        
-        # Process image in vertical strips
-        for y_start in range(0, src.height, max_rows - overlap):
-            y_end = min(y_start + max_rows, src.height)
-            
-            # Read strip
-            window = Window(0, y_start, src.width, y_end - y_start)
-            strip_data = torch.from_numpy(src.read(window=window)).float().to(device)
-            
-            # Resample strip
-            out_shape = (int((y_end - y_start) * scale_factor), 
-                        int(src.width * scale_factor))
-            resampled = F.interpolate(
-                strip_data.unsqueeze(0),
-                size=out_shape,
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(0)
-            
-            # Create and apply blend mask
-            blend_mask = create_blend_mask(
-                out_shape[0], out_shape[1],
-                int(overlap * scale_factor), 
-                device
-            )
-            
-            # Add to output tensors
-            out_y = int(y_start * scale_factor)
-            final_sum[:, out_y:out_y + resampled.shape[1], :] += resampled * blend_mask
-            weights_sum[out_y:out_y + resampled.shape[1], :] += blend_mask
-            
-            # Clean up GPU memory
-            del strip_data, resampled
-            torch.cuda.empty_cache()
-        
-        # Normalize and return final image
-        weights_sum = torch.maximum(weights_sum, torch.tensor(1e-10, device=device))
-        downscaled_image = torch.clip(
-            final_sum / weights_sum,
-            0, 255
-        ).cpu().numpy().astype(np.uint8)
-        
-        return downscaled_image, output_profile
-
-def load_sam_model(config):
-    """
-    Load the SAM (Segment Anything Model) model.
-
-    Args:
-        config (dict): Configuration dictionary containing SAM model parameters.
-
-    Returns:
-        SamAutomaticMaskGenerator: Initialized SAM mask generator.
-    """
-    # Set seeds for reproducibility 
-    seed = config.get('seed', 42)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        
-    sam_checkpoint = config['sam_checkpoint']
-    model_type = config['model_type']
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-    if device == 'cuda':
-        sam = sam.half()  # Enable FP16 for better efficiency
-    
-    mask_generator = SamAutomaticMaskGenerator(
-        sam,
-        points_per_side=config['points_per_side'],
-        pred_iou_thresh=config['pred_iou_thresh'],
-        stability_score_thresh=config['stability_score_thresh'],
-        box_nms_thresh=config['box_nms_thresh'],
-        crop_nms_thresh=config['crop_nms_thresh'],
-        crop_n_layers=config['crop_n_layers']
-    )
-    return mask_generator
-
-def create_threshold_mask(image, config):
-    """Edge detection with targeted edge enhancement and watershed segmentation"""
-    img_f = image.astype(np.float32)
+def create_threshold_mask(image: np.ndarray, output_dir: str) -> np.ndarray:
+    """Create threshold mask using edge detection and watershed segmentation."""
+    # Convert to float32 for calculations
+    img = image.astype(np.float32)
     
     # Calculate vegetation indices
-    shadow = np.log1p(img_f[:,:,1]) - np.log1p(img_f[:,:,2]) 
-    seasonal = (img_f[:,:,1] / (img_f[:,:,0] + img_f[:,:,1] + img_f[:,:,2] + 1)) * 255
-
-    # Initial normalization and enhancement
-    shadow = cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX)
-    seasonal = cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX)
+    shadow = np.log1p(img[:,:,1]) - np.log1p(img[:,:,2])
+    seasonal = (img[:,:,1] / (img[:,:,0] + img[:,:,1] + img[:,:,2] + 1)) * 255
     
+    # Enhance using CLAHE
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    shadow = clahe.apply(shadow.astype(np.uint8))
-    seasonal = clahe.apply(seasonal.astype(np.uint8))
-
-    # Combine weighted channels
-    weighted = (shadow * 0.5 + seasonal * 0.5).astype(np.uint8)
-    save_debug_image(weighted, "01_weighted", config['output_dir'])
-
-    # Edge detection
-    blur = cv2.GaussianBlur(weighted, (5, 5), 0)
-    sobelx = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
-    sobely = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
-    sobel = np.sqrt(sobelx**2 + sobely**2)
-    sobel = cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-    # CLAHE enhance edges
-    sobel = clahe.apply(sobel)
-
-    # Enhance edges in target range
-    target = 10
-    delta = 10
-    strength = 1.0
+    shadow = clahe.apply(cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+    seasonal = clahe.apply(cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
     
+    # Combine channels
+    weighted = (shadow * 0.5 + seasonal * 0.5).astype(np.uint8)
+    
+    # Edge detection and enhancement
+    blur = cv2.GaussianBlur(weighted, (5, 5), 0)
+    sobel = np.sqrt(
+        cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)**2 + 
+        cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)**2
+    )
+    sobel = clahe.apply(cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+    
+    # Enhanced edge targeting
     enhanced = sobel.astype(np.float32)
-    diff = enhanced - target
-    mask = np.abs(diff) < delta
-    enhanced[mask] = target + (diff[mask] * strength)
+    diff = enhanced - 10  # Target edge strength
+    mask = np.abs(diff) < 10  # Delta range
+    enhanced[mask] = 10 + (diff[mask] * 1.0)  # Apply strength multiplier
     enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
     
-    save_debug_image(enhanced, "03_enhanced", config['output_dir'])
     
-    # Watershed segmentation on enhanced edges
-    ret, markers = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    markers = cv2.connectedComponents(markers.astype(np.uint8))[1]
-    markers = markers + 1
+    # Watershed segmentation
+    markers = cv2.connectedComponents(
+        cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    )[1] + 1
     markers[enhanced < 30] = 0
     
-    # Apply watershed
-    markers = cv2.watershed(cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR), markers)
-    watershed_mask = (markers > 1).astype(np.uint8) * 255
-    save_debug_image(watershed_mask, "03a_watershed", config['output_dir'])
-        
+    watershed_mask = (cv2.watershed(
+        cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR), 
+        markers
+    ) > 1).astype(np.uint8) * 255
+    
+    save_debug_image(watershed_mask, output_dir=output_dir, id="03a_watershed")
     return watershed_mask
 
-def scale_for_sam(image, target_size):
-    """
-    Further downscale the image for SAM processing.
-
-    Args:
-        image (numpy.ndarray): Input image.
-        target_size (tuple): Target size (height, width) for downscaling.
-
-    Returns:
-        numpy.ndarray: Downscaled image.
-    """
-    if image.dtype == bool:
-        image = (image.astype(np.uint8) * 255)  # Convert binary mask to uint8
-
-    h, w = image.shape[:2]
-    target_width = target_size[1]  # Fixed width = 4096
-    scale = target_width / w  # Compute scaling factor based on width
-    new_height = max(1, int(h * scale))  # Ensure nonzero height
-    new_size = (target_width, new_height)  # OpenCV expects (width, height)
-    if target_size[0] != target_size[1]:
-        new_size = target_size[::-1]
-    
-    return cv2.resize(image, new_size, interpolation=cv2.INTER_LINEAR if scale > 1 else cv2.INTER_AREA)
-
-def remove_small_segments(masks, min_size, image_shape, image, pixel_value_threshold, min_segment_size):
-    """
-    Remove small segments from multiple masks and combine them.
-
-    Args:
-        masks (list): List of mask dictionaries from SAM.
-        min_size (float): Minimum size threshold for segments.
-        image_shape (tuple): Shape of the original image.
-        image (numpy.ndarray): Original image.
-        pixel_value_threshold (float): Threshold for average pixel value.
-
-    Returns:
-        numpy.ndarray: Combined binary mask with small segments removed.
-    """
-    combined_mask = np.zeros(image_shape, dtype=bool)
+def remove_small_segments(masks: list, image_shape: tuple, image: np.ndarray, 
+                        min_size: float, threshold: float) -> np.ndarray:
+    """Filter and combine valid segments based on size ratios."""
     total_pixels = image_shape[0] * image_shape[1]
-    # First collect all valid segments before erosion
     valid_segments = []
-    for mask in masks[1:]:
+    
+    # Ensure image is in correct format (HWC)
+    if len(image.shape) == 3 and image.shape[0] in [3, 4]:
+        image = image.transpose(1, 2, 0)
+    
+    for mask in masks[1:]:  # Skip first mask as it's often background
         segment = mask['segmentation']
-        if (np.sum(segment)/total_pixels >= min_size):
-            segmented_pixels = image[segment]
-            avg_pixel_value = np.mean(segmented_pixels)/255
-            num_pixels = np.sum(segment)
-            if (avg_pixel_value >= pixel_value_threshold) or 0.8 >= num_pixels/total_pixels >= min_segment_size:
-                valid_segments.append(segment)
-            print(f'Average pixel value: {avg_pixel_value}, Pixel Percent = {100*num_pixels/total_pixels}%')
-
+        # Resize segment if dimensions don't match
+        if segment.shape != image.shape[:2]:
+            segment = cv2.resize(
+                segment.astype(np.uint8),
+                (image.shape[1], image.shape[0]),
+                interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+            
+        segment_ratio = np.sum(segment) / total_pixels
+        
+        # Only check size ratios
+        if (segment_ratio >= min_size) or (0.8 >= segment_ratio >= min_size):
+            valid_segments.append(segment)
+    
+    # Combine valid segments with erosion
     kernel = np.ones((5, 5), np.uint8)
+    combined = np.zeros(image.shape[:2], dtype=bool)
+    print(f'Number of valid segments: {len(valid_segments)}')
     for segment in valid_segments:
         eroded = cv2.erode(segment.astype(np.uint8), kernel, iterations=2)
-        combined_mask = np.logical_or(combined_mask, eroded.astype(bool))
+        combined = np.logical_or(combined, eroded.astype(bool))
     
-    return combined_mask
+    return combined
 
 def process_segment(args):
-    """
-    Process a single segment for nodata removal.
-
-    Args:
-        args (tuple): (label, segment, nodata_mask, max_nodata_percentage, kernel)
-
-    Returns:
-        int or None: Segment label if it should be removed, None otherwise.
-    """
-    label, segment, nodata_mask, max_nodata_percentage, kernel = args
-    if np.sum(segment) < 8000:
+    """Process a single segment checking only for nodata pixels."""
+    label, segment, alpha_mask, max_percentage = args
+    
+    # Check alpha channel for nodata (0 values)
+    segment_alpha_zeros = np.sum(segment & (alpha_mask == 0))
+    segment_size = np.sum(segment)
+    
+    if segment_size > 0 and (segment_alpha_zeros / segment_size) > max_percentage:
         return label
-    dilated_segment = ndimage.binary_dilation(segment, structure=kernel)
-    nodata_count = np.sum(dilated_segment & nodata_mask)
-    segment_size = np.sum(dilated_segment)
-    print(f'Segment: {nodata_count}/{segment_size}--: {nodata_count*100 / segment_size}%')
-    if (segment_size > 0 and (nodata_count / segment_size) > max_nodata_percentage):
-        print(f'Segment removed with {nodata_count*100 / segment_size}% nodata pixels')
-        return label
+        
     return None
 
-def remove_nodata_segments(mask, rgb_image, nodata_value, max_nodata_percentage, border_size, num_threads=4):
-    """
-    Remove segments with a high percentage of no-data pixels.
-
-    Args:
-        mask (numpy.ndarray): Input binary mask.
-        rgb_image (numpy.ndarray): Original RGB image.
-        nodata_value (numpy.ndarray): Value representing no-data pixels.
-        max_nodata_percentage (float): Maximum allowed percentage of no-data pixels.
-        border_size (int): Size of the border for dilation.
-        num_threads (int): Number of threads for parallel processing.
-
-    Returns:
-        numpy.ndarray: Updated mask with high no-data segments removed.
-    """
+def remove_nodata_segments(mask: np.ndarray, image: np.ndarray, **kwargs) -> np.ndarray:
+    """Remove segments with excessive no-data pixels."""
+    max_nodata = kwargs.get('max_nodata_percentage', 0.3)
+    threads = kwargs.get('num_threads', 4)
+    
+    # Ensure image is in correct format
+    if len(image.shape) == 3 and image.shape[0] in [3, 4]:
+        image = image.transpose(1, 2, 0)
+    
+    # Label connected components
     labeled, num_features = ndimage.label(mask)
-    print(f'Number of segments: {num_features}')
-    if rgb_image.shape[0] == 4:
-        rgb_image = rgb_image.transpose(1, 2, 0)
-                
-    # Create nodata mask
-    nodata_mask = np.all(rgb_image == nodata_value, axis=-1)
     
-    print(f'Number of nodata pixels: {np.sum(nodata_mask)}')
-    # Create morphological kernel
-    kernel = np.ones((border_size, border_size), dtype=bool)
-        
-    # Prepare arguments for multiprocessing
+    # Get alpha channel (assume it's the last channel)
+    alpha_channel = image[:, :, -1] if image.shape[-1] == 4 else np.ones_like(mask) * 255
+    
+    # Create list of segments
     segments = [labeled == i for i in range(1, num_features + 1)]
-    args = [(i+1, segment, nodata_mask, max_nodata_percentage, kernel) for i, segment in enumerate(segments)]
     
-    # Process segments in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+    args = [(i+1, seg, alpha_channel, max_nodata) 
+            for i, seg in enumerate(segments)]
+    
+    with ThreadPoolExecutor(max_workers=threads) as executor:
         results = list(executor.map(process_segment, args))
     
-    # Remove segments that exceed the nodata threshold
-    segments_to_remove = [label for label in results if label is not None]
-    mask[np.isin(labeled, segments_to_remove)] = 0
-    
+    # Remove invalid segments
+    mask[np.isin(labeled, [r for r in results if r is not None])] = 0
     return mask
 
-def show_masks(image, masks, random_colors=True):
-    """
-    Visualize masks overlaid on the image.
-
-    Args:
-        image (numpy.ndarray): Original image.
-        masks (list): List of mask dictionaries from SAM.
-        random_colors (bool): Whether to use random colors for masks.
-    """
-    plt.figure(figsize=(12, 12))
-    plt.imshow(image)
+def segment_image(image: np.ndarray, mask_generator, **kwargs) -> list:
+    """Generate masks using SAM.
     
-    # Create a color map
-    if random_colors:
-        color_map = plt.cm.get_cmap('tab20')  # You can try other colormaps like 'Set1', 'Set2', 'Set3', etc.
-    else:
-        color_map = plt.cm.get_cmap('viridis')  # A sequential colormap
-    
-    # Create a single mask that combines all individual masks
-    combined_mask = np.zeros(image.shape[:2] + (4,), dtype=np.float32)
-    
-    for i, mask in enumerate(masks):
-        mask_image = mask['segmentation']
-        if random_colors:
-            color = color_map(random.random())
-        else:
-            color = color_map(i / len(masks))
-        
-        mask_color = np.concatenate([color[:3], [0.7]])  # RGBA
-        combined_mask[mask_image] = mask_color
-    
-    plt.imshow(combined_mask)
-    plt.title(f"Number of segments: {len(masks)}")
-    plt.axis('off')
-    plt.show()
-
-def segment_image(image, mask_generator, config):
-    """
-    Apply the SAM model to the image and process the resulting masks.
-
-    Args:
-        image (numpy.ndarray): Input image.
-        mask_generator (SamAutomaticMaskGenerator): SAM mask generator.
-        config (dict): Configuration dictionary.
-
     Returns:
-        numpy.ndarray: Combined binary mask after processing.
-    """ 
-    if image.ndim == 2:
-        image = np.stack([image, image, image], axis=-1)
+        list: List of mask dictionaries from SAM
+    """
+    target_size = kwargs.get('target_size', (1024, 1024))
+    show = kwargs.get('show_masks', False)
     
-    size = image.shape[:2]
-    print(f'Size: {size}')
-    # Resize image to 1024 hight and keep aspect ratio
-    image = scale_for_sam(image, (1024, 1024))
+    # Ensure correct format and size
+    if image.ndim == 2:
+        image = np.stack([image] * 3, axis=-1)
+    original_size = image.shape[:2]
+    image = scale_for_sam(image, target_size)
     
     # Generate masks
     with torch.amp.autocast('cuda'):
         masks = mask_generator.generate(image)
-    if config.get('show_masks', False):
-        show_masks(image, masks, random_colors=True)
-    # Remove small segments and combine masks
-    min_segment_size = config['segmentation']['min_segment_size']
-    combined_mask = remove_small_segments(masks, min_segment_size, image.shape[:2], image, config['segmentation']['pixel_value_threshold'], config['segmentation']['min_segment_size'])
     
-    combined_mask = scale_for_sam(combined_mask, size)
-    return combined_mask
+    if show:
+        show_masks(image, masks, random_colors=True)
+    
+    return masks
 
 def keep_largest_segment(mask):
     """
@@ -562,218 +195,272 @@ def keep_largest_segment(mask):
     else:
         return mask
 
-def detect_and_remove_dams(mask, image, outlier_threshold=1.5):
-    """
-    Detect potential dams and remove them from the mask.
-
-    Args:
-        mask (numpy.ndarray): Input binary mask.
-        image (numpy.ndarray): Original image.
-        outlier_threshold (float): Z-score threshold for outlier detection.
-
-    Returns:
-        numpy.ndarray: Updated mask with potential dams removed.
-    """
-    labeled_mask, num_features = ndimage.label(mask)
-    
-    # Handle channel-first format
-    if len(image.shape) == 3:
-        if image.shape[0] in [3, 4]:  # If channels first
-            image = image.transpose(1, 2, 0)  # Convert to HWC
-            
-    # Skip if no segments found
+def remove_outliers(mask: np.ndarray, image: np.ndarray, threshold: float = 1.5) -> np.ndarray:
+    """Remove segments with anomalous RGB statistics."""
+    labeled, num_features = ndimage.label(mask)
     if num_features == 0:
         return mask
+        
+    image = image.transpose(1, 2, 0) if len(image.shape) == 3 and image.shape[0] in [3, 4] else image
     
-    segment_stats = []
+    # Calculate segment statistics
+    stats_list = []
     for i in range(1, num_features + 1):
-        segment = (labeled_mask == i)
-        segment_pixels = image[segment]
-        if len(segment_pixels) > 0:
-            std_rgb = np.std(segment_pixels[:, :3], axis=0)  # Only use RGB channels
-            segment_stats.append(std_rgb)
+        segment = labeled == i
+        pixels = image[segment]
+        if len(pixels) > 0:
+            stats_list.append(np.std(pixels[:, :3], axis=0))
     
-    segment_stats = np.array(segment_stats)
-    z_scores = stats.zscore(segment_stats, axis=0)
-    outliers = np.any(z_scores < -outlier_threshold, axis=1)
+    if not stats_list:
+        return mask
+        
+    # Remove outlier segments
+    outliers = np.any(stats.zscore(np.array(stats_list), axis=0) < -threshold, axis=1)
     for i, is_outlier in enumerate(outliers):
         if is_outlier:
-            mask[labeled_mask == (i + 1)] = False
+            mask[labeled == (i + 1)] = False
+    
     return mask
 
-def apply_autumn_filter(image):
-    """Convert RGB image to autumn colors while preserving alpha channel"""
+def extract_uog_id(filepath):
+    """Extract UOG ID from filepath or generate a sequential one if not found."""
+    import re
     
-    if image.shape[2] > 4:
-        image = image.transpose(1, 2, 0)
-        print(f'Image shape after transpose: {image.shape}')
+    # Try to find UOG_XXXX pattern in the filepath
+    match = re.search(r'UOG_(\d{4})', filepath)
+    if match:
+        return match.group(0)
     
-    # Extract alpha and RGB channels
-    alpha = image[:, :, 3]  # Get alpha channel
-    rgb = image[:, :, :3]   # Get RGB channels
+    # If not found, extract just the numbers
+    numbers = re.findall(r'\d+', filepath)
+    if numbers:
+        # Use the last sequence of numbers found, zero-padded to 4 digits
+        return f"UOG_{numbers[-1]:0>4}"
     
-    # Process RGB channels
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    lower_green = np.array([30, 40, 40])
-    upper_green = np.array([80, 255, 255])
-    green_mask = cv2.inRange(hsv, lower_green, upper_green)
-    
-    autumn_hsv = hsv.copy()
-    autumn_hsv[green_mask > 0] = np.array([15, 200, 200])
-    variation = np.random.randint(-10, 10, autumn_hsv.shape)
-    autumn_hsv = np.clip(autumn_hsv + variation, 0, 255).astype(np.uint8)
-    
-    autumn_rgb = cv2.cvtColor(autumn_hsv, cv2.COLOR_HSV2RGB)
-    rgb_result = cv2.addWeighted(rgb, 0.3, autumn_rgb, 0.7, 0)
-    
-    # Recombine with alpha channel
-    result = np.dstack([rgb_result, alpha])
-    
-    print("Output image shape:", result.shape)
-    # Convert to channel-first format
-    return result.transpose(2, 0, 1)
+    # If no numbers found, return None
+    return None
 
-def save_debug_image(image, filename, output_dir):
-    """
-    Save debug image in both PNG and NPY formats, handling different shapes appropriately.
-    
-    Args:
-        image: Input image/mask that could be:
-            - HWC format (height, width, channels)
-            - CHW format (channels, height, width)
-            - HW format (height, width) for single-channel masks
-        filename: Name for the saved files
-        output_dir: Output directory
-    """
-    # return
-    debug_dir = os.path.join(output_dir, "debug")
-    os.makedirs(debug_dir, exist_ok=True)
-    
-    # Handle different input shapes
-    if image.ndim == 2:  # Single channel mask
-        plt.imsave(os.path.join(debug_dir, f"{filename}.png"), image, cmap='gray')
-    elif image.ndim == 3:
-        if image.shape[0] in [3, 4]:  # CHW format
-            image_to_save = image.transpose(1, 2, 0)
-        else:  # Already in HWC format
-            image_to_save = image
-        plt.imsave(os.path.join(debug_dir, f"{filename[17:22]+filename[72:]}.png"), image_to_save)   
-  
 def process_single_file(input_file, output_dir, config, mask_generator, preprocess=True):
-    """
-    Process a single input file with debug image saves at key pipeline stages.
-
-    Args:
-        input_file (str): Path to the input file.
-        output_dir (str): Directory to save output files.
-        config (dict): Configuration dictionary.
-        mask_generator (SamAutomaticMaskGenerator): SAM mask generator.
-
-    Returns:
-        tuple: (success, downscaled_image, output_profile)
-            success (bool): Whether processing was successful.
-            downscaled_image (numpy.ndarray): Downscaled image data.
-            output_profile (dict): Rasterio profile for the output.
-    """
-    print(f"Processing file: {input_file}")
-    rel_path = os.path.relpath(input_file, config['root_dir'])
-    unique_id = rel_path.replace(os.path.sep, '_').replace('.', '_')
+    """Process a single input file with progress tracking and timing information."""
+    start_time = time.time()
     
+    # Extract UOG ID
+    uog_id = extract_uog_id(input_file)
+    if not uog_id:
+        print(f"Warning: Could not extract UOG ID from {input_file}")
+        uog_id = "UOG_0000"
+    
+    filename = os.path.basename(input_file)
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Processing: {uog_id} - {filename}")
+    
+    # Check if we should skip segmentation
+    if config.get('skip_enabled', False) and input(f"Skip segmentation for {uog_id}? (y/n): ").lower() == 'y':
+        print("→ Skipping segmentation")
+        return False, None, None
+    
+    # Setup file paths
+    rel_path = os.path.relpath(input_file, config['root_dir'])
+    unique_id = f"{uog_id}_{rel_path.replace(os.path.sep, '_').replace('.', '_')}"
     downscaled_file = os.path.join(output_dir, "orthos", f"downscaled_{unique_id}.tif")
     mask_file = os.path.join(output_dir, "masks", f"seg_mask_{unique_id}.tif")
 
     os.makedirs(os.path.dirname(downscaled_file), exist_ok=True)
     os.makedirs(os.path.dirname(mask_file), exist_ok=True)
 
-    # Downscaling and loading initial image
+    # Downscaling phase
     if os.path.exists(downscaled_file):
-        print(f"Loading existing downscaled image: {downscaled_file}")
+        print("→ Loading existing downscaled image")
         with rasterio.open(downscaled_file) as src:
             downscaled_image = src.read()
             output_profile = src.profile.copy()
     else:
+        print("→ Downscaling image...")
+        downscale_start = time.time()
         downscaled_image, output_profile = downscale_tif(input_file, config)
-        print("Saving downscaled image...")
+        print(f"  ✓ Completed in {time.time() - downscale_start:.1f}s")
+        
         with rasterio.open(downscaled_file, 'w', **output_profile) as dst:
             dst.write(downscaled_image)
-        
-    if config.get('skip_enabled', False):
-        skip = input("Skip segmentation? (y/n): ")
-        if skip.lower() == 'y':
-            return False, downscaled_image, output_profile
-        
-    save_debugs = config.get('save_debug', False)
-    # Apply autumn filter
+    
+    # Save debug image of downscaled result
+    if config.get('save_debug', False):
+        save_debug_image(
+            downscaled_image.transpose(1, 2, 0), 
+            output_dir=output_dir,
+            filename=uog_id,
+            id="_01_downscaled"
+        )
+    
+    # Preprocessing phase
     image = downscaled_image
+    if config.get('autumn_filtered', False):
+        print(f"→ Applying autumn filter to {uog_id}...")
+        image = apply_autumn_filter(image)
+        if config.get('save_debug', False):
+            save_debug_image(
+                image.transpose(1, 2, 0), 
+                output_dir=output_dir,
+                filename=uog_id,
+                id="_02_autumn"
+            )
     
-    image = apply_autumn_filter(image)
-    if save_debugs:
-        save_debug_image(image, f"{unique_id}_02_original", output_dir)
-
     config["output_dir"] = output_dir
-
-    # Threshold mask creation
     image = image.transpose(1, 2, 0)
+    
+    # Segmentation phase
+    print("→ Running segmentation...")
+    seg_start = time.time()
+    
     if preprocess:
-        sam_image = create_threshold_mask(image, config)
+        sam_image = create_threshold_mask(image, output_dir)
     else:
-        if image.shape[2] == 4:
-            sam_image = image[:, :, :3]
+        sam_image = image[:, :, :3] if image.shape[2] == 4 else image
     
+    # Get SAM masks
+    masks = segment_image(
+        image=sam_image,
+        mask_generator=mask_generator,
+        target_size=config['segmentation']['sam_target_size'],
+        show_masks=config.get('show_masks', False)
+    )
     
-    # Segmentation
-    segmentation_mask = segment_image(sam_image, mask_generator, config)
-        
-    print("Segmentation completed.")
-    if save_debugs:
-        save_debug_image(segmentation_mask*255, f"{unique_id}_03_segmentation_mask", output_dir)
-       
-    # No-data removal
-    nodata_value = np.array(config['segmentation']['nodata_value'])    
-    max_nodata_percentage = config['segmentation']['max_nodata_percentage']
-    border_size = config['segmentation'].get('border_size', 3)
+    print(f'Number of masks: len(masks) = {len(masks)}')
     
-    cleaned_mask = remove_nodata_segments(segmentation_mask, image, nodata_value, max_nodata_percentage, border_size, num_threads=12)
-        
-    print("No-data removal completed.")
-    if save_debugs:
-        save_debug_image(cleaned_mask*255, f"{unique_id}_04_no_data_cleaned_mask", output_dir)
+    # Process and combine masks
+    print("→ Processing segments...")
+    combined_mask = remove_small_segments(
+        masks, 
+        sam_image.shape[:2], 
+        sam_image,
+        config['segmentation']['min_segment_size'],
+        config['segmentation']['pixel_value_threshold']
+    )
     
-    # Dam removal
-    outlier_threshold = config['segmentation']['outlier_threshold']
-    final_mask = detect_and_remove_dams(cleaned_mask, image, outlier_threshold)
-    if save_debugs:
-        save_debug_image(final_mask*255, f"{unique_id}_Final", output_dir)
+    if config.get('save_debug', False):
+        save_debug_image(
+            combined_mask,
+            output_dir=output_dir,
+            filename=uog_id,
+            id="_03_initial_mask"
+        )
     
-    print("Dam removal completed.")
+    print(f"  ✓ Segmentation completed in {time.time() - seg_start:.1f}s")
     
-    # check if more than 30% of the area is segmented
-    if np.sum(final_mask) / (final_mask.shape[0] * final_mask.shape[1]) < 0.3:
-        print(f"Segmented area is too Small: {np.sum(final_mask)} pixels")
+    # Post-processing phase
+    print("\n→ Starting post-processing pipeline...")
+    post_start = time.time()
+    
+    print("  → Removing nodata segments...")
+    nodata_start = time.time()
+    cleaned_mask = remove_nodata_segments(
+        mask=combined_mask,
+        image=image,
+        max_nodata_percentage=config['segmentation']['max_nodata_percentage'],
+        num_threads=12
+    )
+    print(f"    ✓ Completed in {time.time() - nodata_start:.1f}s")
+    
+    if config.get('save_debug', False):
+        save_debug_image(
+            cleaned_mask,
+            output_dir=output_dir,
+            filename=uog_id,
+            id="_04_cleaned_mask"
+        )
+    
+    print("  → Removing statistical outliers...")
+    outlier_start = time.time()
+    final_mask = remove_outliers(cleaned_mask, image, config['segmentation']['outlier_threshold'])
+    print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
+    
+    if config.get('save_debug', False):
+        save_debug_image(
+            final_mask,
+            output_dir=output_dir,
+            filename=uog_id,
+            id="_05_final_mask"
+        )
+    
+    # Validation check
+    print("  → Validating segmentation coverage...")
+    validation_start = time.time()
+    area_ratio = np.sum(final_mask) / (255 * final_mask.shape[0] * final_mask.shape[1])
+    if area_ratio < 0.15:
+        print(f"    ✗ Insufficient segmented area: {area_ratio:.1%}")
         return False, image, output_profile
+    print(f"    ✓ Completed in {time.time() - validation_start:.1f}s")
     
-    # Final mask processing
+    # Final processing
+    print("  → Extracting largest segment...")
+    final_start = time.time()
     final_mask = keep_largest_segment(np.logical_not(final_mask))
     final_mask = np.where(final_mask == 1, 0, -999)
-
-    # Save final mask
+    print(f"    ✓ Completed in {time.time() - final_start:.1f}s")
+    
+    total_post = time.time() - post_start
+    print(f"✓ Post-processing completed in {total_post:.1f}s")
+    
+    # Save results
+    print("\n→ Saving results...")
+    save_start = time.time()
     mask_profile = output_profile.copy()
     mask_profile.update(dtype=rasterio.float32, count=1, nodata=-999)
     with rasterio.open(mask_file, 'w', **mask_profile) as dst:
         dst.write(final_mask.astype(rasterio.float32), 1)
-
+    print(f"  ✓ Completed in {time.time() - save_start:.1f}s")
+    
+    total_time = time.time() - start_time
+    print(f"\n✓ Total processing completed in {total_time:.1f}s")
     return True, image, output_profile
 
-def main(config_file, root_dir):
-    """
-    Main function to process all files.
+def print_config_summary(config):
+    """Print a formatted summary of important configuration settings."""
+    print("\n=== Configuration Summary ===")
+    
+    # SAM Model Settings
+    print("\nSAM Model Settings:")
+    print("------------------")
+    for key in ['model_type', 'points_per_side', 'pred_iou_thresh', 
+                'stability_score_thresh', 'box_nms_thresh', 'crop_nms_thresh',
+                'crop_n_layers']:
+        thresh_val = config['segmentation']['thresholded_settings'].get(key)
+        unproc_val = config['segmentation']['unprocessed_settings'].get(key)
+        if thresh_val != unproc_val:
+            print(f"{key:.<25} Threshold: {thresh_val}, Unprocessed: {unproc_val}")
+        else:
+            print(f"{key:.<25} {thresh_val}")
+    
+    # Segmentation Settings
+    print("\nSegmentation Settings:")
+    print("--------------------")
+    seg_config = config['segmentation']
+    for key in ['sam_target_size', 'min_segment_size', 'pixel_value_threshold',
+                'max_nodata_percentage', 'outlier_threshold']:
+        print(f"{key:.<25} {seg_config.get(key)}")
+    
+    # Downscaling Settings
+    print("\nDownscaling Settings:")
+    print("-------------------")
+    down_config = config['downscaling']
+    for key in ['target_size', 'chunk_size', 'overlap']:
+        print(f"{key:.<25} {down_config.get(key)}")
+    
+    # Processing Settings
+    print("\nProcessing Settings:")
+    print("------------------")
+    print(f"{'Save debug images':.<25} {config.get('save_debug', False)}")
+    print(f"{'Apply autumn filter':.<25} {config.get('autumn_filtered', False)}")
+    print(f"{'Show masks':.<25} {config.get('show_masks', False)}")
+    
+    print("\n" + "="*50 + "\n")
 
-    Args:
-        config_file (str): Path to the configuration file.
-        root_dir (str): Root directory to search for input files.
-    """
+def main(config_file, root_dir):
+    start_time = time.time()
+    print(f"\n=== Starting processing at {datetime.now().strftime('%H:%M:%S')} ===")
+    
     config = load_config(config_file)
     config['root_dir'] = root_dir
+    print_config_summary(config)
     target_filename = config.get('input', {}).get('target_filename', 'orthomosaic_visible.tif')
 
     # Load the SAM model
@@ -788,28 +475,28 @@ def main(config_file, root_dir):
     os.makedirs(os.path.join(output_dir, "orthos"), exist_ok=True)
     os.makedirs(os.path.join(output_dir, "masks"), exist_ok=True)
 
+    print(f"Found {len(matching_files)} files to process")
+    
     reprocess = []
-    for input_file in matching_files:
-        # try:
+    for i, input_file in enumerate(matching_files, 1):
+        print(f"\nProcessing file {i}/{len(matching_files)}")
         success, _, _ = process_single_file(input_file, output_dir, config, mask_generator, preprocess=True)
-        if success:
-            print(f"Successfully processed {input_file}")
-        else:
+        if not success:
             reprocess.append(input_file)
-            print(f"Failed to process {input_file}")
-        # except Exception as e:
-        #     print(f"Error processing {input_file}: {str(e)}")
-
-    if len(reprocess) != 0:
+    
+    if reprocess:
+        print(f"\nRetrying {len(reprocess)} failed files with alternative settings...")
         mask_generator = load_sam_model(config['segmentation']['unprocessed_settings'])
         
-    for input_file in reprocess:
-        success, _, _ = process_single_file(input_file, output_dir, config, mask_generator, preprocess=False)
-        if success:
-            print(f"Successfully processed {input_file}")
-        else:
-            print(f"Failed to process {input_file}")
-        
+        for i, input_file in enumerate(reprocess, 1):
+            print(f"\nReprocessing file {i}/{len(reprocess)}")
+            success, _, _ = process_single_file(input_file, output_dir, config, mask_generator, preprocess=False)
+    
+    total_time = time.time() - start_time
+    print(f"\n=== Processing completed in {total_time:.1f}s ===")
+    print(f"Successfully processed: {len(matching_files) - len(reprocess)} files")
+    if reprocess:
+        print(f"Failed to process: {len(reprocess)} files")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Orchard Downscaling and Segmentation")
