@@ -129,16 +129,24 @@ def load_data(opt):
     drop_last_batch = {'train': True, 'test': False, 'train4val': False}
     shuffle = {'train': True, 'test': False, 'train4val': False}
 
+    imagenet_mean = [0.485, 0.456, 0.406]
+    imagenet_std = [0.229, 0.224, 0.225]
+
+    num_channels = opt.INPUT_CHANNELS
+
+    means = imagenet_mean * (num_channels // 3) + imagenet_mean[:num_channels % 3]
+    stds = imagenet_std * (num_channels // 3) + imagenet_std[:num_channels % 3]
+
     if opt.MODIFIED:
         print('modified')
         transform = transforms.Compose([transforms.Resize(opt.INPUT_SIZE),
                                         transforms.CenterCrop(opt.INPUT_SIZE),
                                         transforms.RandomRotation(degrees=45),
-                                        transforms.Normalize((0.5), (0.5)), ])
+                                        transforms.Normalize(mean=means, std=stds), ])
     else:
         transform = transforms.Compose([transforms.Resize(opt.INPUT_SIZE),
                                         transforms.CenterCrop(opt.INPUT_SIZE),
-                                        transforms.Normalize((0.5), (0.5)), ])
+                                        transforms.Normalize(mean=means, std=stds), ])
 
 
     dataset = {x: StitchoDataset(meta_file=splits2metadata[x], transform_fn=transform, resize_dim=(opt.INPUT_SIZE, opt.INPUT_SIZE), dataroot=opt.dataroot) for x in splits}

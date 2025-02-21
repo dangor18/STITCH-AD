@@ -1,5 +1,6 @@
 PRE_PROCESS/DATA/configs/*
 venv
+.venv
 env
 myenv
 *.npy
@@ -12,3 +13,7 @@ PATCH_AD/UniAD/UniAD/*
 *.png
 
 *logs/*
+
+orchards/
+DATA/configs/
+PATCH_AD/SCADN/configs/
