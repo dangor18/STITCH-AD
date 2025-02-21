@@ -40,6 +40,11 @@ def get_scores(model_type, params, device):
             params: dictionary containing parameters for the model
             device: device to run the model on
     """
+    # check if json file exists
+    if os.path.exists(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json"):
+        with open(f"ORCHARD_AD/checkpoint/{model_type}_score_dict.json", "r") as f:
+            return json.load(f)
+    
     start_time = time.time()
     print("GETTING PATCH DATA...")
     score_dict = defaultdict(lambda: [])
@@ -58,9 +63,9 @@ def get_scores(model_type, params, device):
     end_time = time.time()
     run_time = end_time - start_time
     print("TIME (s):", run_time)
-    # write dict to file (only used for the demo) TODO
-    #with open(f"ORCHARD_AD/{model_type}_score_dict.json", "w") as f:
-    #    json.dump(score_dict, f)
+    # write dict to file (only used for the demo)
+    with open(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json", "w") as f:
+        json.dump(score_dict, f)
 
     return score_dict
 
@@ -368,13 +373,8 @@ if __name__ == "__main__":
         pred_list = {-1: "Anomalous", 1: "Normal"}
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # load the json file and skip the DL model inference part WIP
-        if args.test:
-            with open(f"data/{model_type}_score_dict.json", "r") as f:
-                score_dict = json.load(f)
-        else:
-            # start here
-            score_dict = get_scores(model_type, model_params, device)
+        # start here
+        score_dict = get_scores(model_type, model_params, device)
 
         pr_dict, normal_cm, anomalous_cm = infer_iso_forest(orchard_params, score_dict)
         print("===================== ISOLATION FOREST =====================")
