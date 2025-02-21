@@ -67,6 +67,22 @@ class StitchoDataset(Dataset):
 
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
+
+        # scale layers to 0-1
+        for i in range(image.shape[2]):
+            min = np.min(image[:, :, i])
+            max = np.max(image[:, :, i])
+            image[:, :, i] = (image[:, :, i] - min) / (max - min)
+
+        # # use numpy to show each layer in the image
+        # num_images = image.shape[2]
+        # fig, axes = plt.subplots(1, num_images, figsize=(15, 5))
+        # for i in range(num_images):
+        #     print(f'layer {i}: {np.min(image[:, :, i])} - {np.max(image[:, :, i])}')
+        #     axes[i].imshow(image[:, :, i])
+        #     axes[i].axis('off')
+        # plt.show()
+        # exit()
         
         input.update(
             {
