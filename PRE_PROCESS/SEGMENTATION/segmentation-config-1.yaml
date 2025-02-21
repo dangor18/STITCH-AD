@@ -1,15 +1,25 @@
+# Input/Output settings
 input:
   target_filename: orthomosaic_visible.tif
 
+# Image preprocessing settings
 downscaling:
   target_size: [4096, 4096]
   chunk_size: 4096
   overlap: 128
   num_workers: 10
 
+# Segmentation settings
 segmentation:
-  pixel_value_threshold: 0.3
+  sam_target_size: [1024, 1024]
   min_segment_size: 0.01
+  pixel_value_threshold: 0.3
+  max_nodata_percentage: 0.0001
+  outlier_threshold: 1.3
+  border_size: 50
+  nodata_value: [255, 255, 255, 0]
+
+  # Initial segmentation settings
   thresholded_settings:
     sam_checkpoint: "PRE_PROCESS/SEGMENTATION/sam_vit_b_01ec64.pth"
     model_type: "vit_b"
@@ -19,28 +29,21 @@ segmentation:
     box_nms_thresh: 0.4
     crop_nms_thresh: 0.4
     crop_n_layers: 0
+    
+  # Fallback segmentation settings
   unprocessed_settings:
     sam_checkpoint: "PRE_PROCESS/SEGMENTATION/sam_vit_b_01ec64.pth"
     model_type: "vit_b"
     points_per_side: 32
     pred_iou_thresh: 0.08
-    crop_n_layers: 1
     stability_score_thresh: 0.8
     box_nms_thresh: 0.6
     crop_nms_thresh: 0.6
-  sam_target_size: [1024, 1024]
-  nodata_value: [255, 255, 255, 0]
-  max_nodata_percentage: 0.0001
-  border_size: 50
-  outlier_threshold: 1.3 # for dam detection
-  color_thresholds:
-    lower_green: [30, 40, 40]
-    upper_green: [80, 245, 200]
-  morphology:
-    kernel_size: 7
+    crop_n_layers: 1
 
-show_masks: False
+# Processing control flags
+show_masks: True
 skip_enabled: True
-seed: 42
 save_debug: True
 autumn_filtered: True
+seed: 42

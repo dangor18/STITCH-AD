@@ -4,8 +4,6 @@ import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.windows import Window
-import yaml
-import argparse
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import torch
@@ -14,6 +12,7 @@ from scipy import ndimage, stats
 import concurrent.futures
 from matplotlib import pyplot as plt
 import random
+import re
 
 try:
     import torch
@@ -345,41 +344,45 @@ def show_masks(image, masks, random_colors=True):
     plt.axis('off')
     plt.show()
     
-def save_debug_image(image, filename="", output_dir="", id=""):
-    """
-    Save debug image in both PNG and NPY formats, handling different shapes appropriately.
+def save_debug_image(image, output_dir="", filename="", id=""):
+    """Save debug image handling different image formats.
     
     Args:
-        image: Input image/mask that could be:
-            - HWC format (height, width, channels)
-            - CHW format (channels, height, width)
-            - HW format (height, width) for single-channel masks
-        filename: Name for the saved files
-        output_dir: Output directory
+        image: Input image array (HWC, CHW, or HW format)
+        output_dir: Output directory path
+        filename: UOG ID or base filename
+        id: Identifier suffix for the filename
     """
-    # return
+    if not output_dir:
+        return
+        
     debug_dir = os.path.join(output_dir, "debug")
     os.makedirs(debug_dir, exist_ok=True)
-    if filename != "":
-        filename = filename[18:23]
     
-    # Handle different input shapes
-    if image.ndim == 2:  # Single channel mask
+    # Use UOG ID as filename if provided, otherwise use original filename
+    if filename.startswith("UOG_"):
+        base_name = filename
+    else:
+        # Extract or generate UOG ID from filename
+        uog_match = re.search(r'UOG_\d{4}', filename)
+        base_name = uog_match.group(0) if uog_match else "UOG_0000"
+    
+    save_path = os.path.join(debug_dir, f"{base_name}{id}.png")
+    
+    # Handle different input formats
+    if image.ndim == 2:
         filled_mask = (image > 0).astype(np.uint8) * 255
-        plt.imsave(os.path.join(debug_dir, f"{filename+id}.png"), filled_mask, cmap='gray')
+        plt.imsave(save_path, filled_mask, cmap='gray')
     elif image.ndim == 3:
         if image.shape[0] in [3, 4]:  # CHW format
-            image_to_save = image.transpose(1, 2, 0)
-        else:  # Already in HWC format
-            image_to_save = image
-        plt.imsave(os.path.join(debug_dir, f"{filename + id}.png"), image_to_save) 
+            image = image.transpose(1, 2, 0)
+        plt.imsave(save_path, image)
 
 def apply_autumn_filter(image):
     """Convert RGB image to autumn colors while preserving alpha channel"""
     
     if image.shape[2] > 4:
         image = image.transpose(1, 2, 0)
-        print(f'Image shape after transpose: {image.shape}')
     
     # Extract alpha and RGB channels
     alpha = image[:, :, 3]  # Get alpha channel
@@ -402,6 +405,5 @@ def apply_autumn_filter(image):
     # Recombine with alpha channel
     result = np.dstack([rgb_result, alpha])
     
-    print("Output image shape:", result.shape)
     # Convert to channel-first format
     return result.transpose(2, 0, 1)
