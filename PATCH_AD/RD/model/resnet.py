@@ -348,17 +348,9 @@ def _resnet(
     """
     Constructs a ResNet model for the specified architecture. If pretrained is True then loads IMAGENET weights.
     """
-    model = ResNet(block, layers, in_channels=in_channels, **kwargs)
+    model = ResNet(block, layers, in_channels=3 if in_channels < 3 else in_channels, **kwargs)
     if pretrained:
-        #weights = ResNet50_Weights.FMOW_RGB_GASSL
-        #state_dict = weights.get_state_dict(progress=progress)
         state_dict = load_state_dict_from_url(model_urls[arch],progress=progress)
-        if in_channels == 1:
-            original_conv1_weight = state_dict['conv1.weight']
-            new_conv1_weight = original_conv1_weight.sum(dim=1, keepdim=True)
-            new_conv1_weight = new_conv1_weight / 3.0  # average the channels
-        
-            state_dict['conv1.weight'] = new_conv1_weight
             
         if in_channels > 3:
             # for >3 channels, repeat the RGB weights

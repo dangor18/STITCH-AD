@@ -1,14 +1,14 @@
 data_path: PRE_PROCESS/DATA/PATCHES/DEM_50_172/
-meta_path_test: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata/test_metadata.json
-meta_path_train: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata/train_metadata.json
-log_path: logs/transforms_50.txt
+meta_path_test: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata-1996/test_metadata.json
+meta_path_train: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata-1996/train_metadata.json
+log_path: logs/DEM_50_172_no1996.txt
 resize_x: 256
 resize_y: 256
 transforms: True
 channels: 2
 num_workers: 4
 
-model_path: checkpoints/DEM_172.pth
+model_path: checkpoints/DEM_172_no1996.pth
 architecture: "wide_resnet50_2"
 #bn_attention: CBAM
 bn_attention: False

@@ -6,12 +6,28 @@ import numpy as np
 import os
 import cv2
 from scipy import ndimage
-from sklearn.decomposition import PCA
-from skimage import filters
 from data.noise import Simplex_CLASS
 from torchvision import transforms
 import json
 import random
+
+from dataclasses import dataclass
+from typing import Tuple
+
+@dataclass
+class AugmentationParams:
+    p_flip: float = 0.5
+    p_rotate: float = 0.5
+    p_crop: float = 0.5
+    p_blur: float = 0.1
+    p_noise: float = 0.1
+
+@dataclass
+class SimplexNoiseParams:
+    octaves: int = 9
+    persistence: float = 0.8
+    amplitude: float = 0.7
+    frequency: int = 32
 
 def plot_channels(image, title):
     """
@@ -40,8 +56,9 @@ class train_dataset(Dataset):
         meta_file,
         data_path,
         resize_dim=(256, 256),
-        transform_fn=None,
-        p_flip=0.5,
+        transform_fn=False,
+        aug_params: AugmentationParams = AugmentationParams(),
+        simplex_params: SimplexNoiseParams = SimplexNoiseParams(),
         in_channels=3,
     ):
         self.meta_file = meta_file
@@ -53,12 +70,15 @@ class train_dataset(Dataset):
         imagenet_std = [0.229, 0.224, 0.225]
         self.in_channels = in_channels
 
-        # repeat above norms and std for each in channel
-        mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
-        std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
-        self.normalize = transforms.Normalize(mean=mean, std=std)
+        if self.in_channels > 3:
+            # repeat above norms and std for each in channel
+            imagenet_mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
+            imagenet_std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
+
+        self.normalize = transforms.Normalize(mean=imagenet_mean, std=imagenet_std)
         self.transform_fn = transform_fn
-        self.p_flip = p_flip
+        self.aug_params = aug_params
+        self.simplex_params = simplex_params
         
         # construct metas
         with open(self.meta_file, "r") as f_r:
@@ -116,7 +136,7 @@ class train_dataset(Dataset):
         
         return dem_copy
 
-    def get_psuedo_case2(self, dem, amplitude=1):
+    def get_psuedo_case2(self, dem):
         """"
             Return psuedo case 2 by adding simplex noise to the dem
         """
@@ -127,23 +147,52 @@ class train_dataset(Dataset):
         start_h_noise = np.random.randint(1, size - h_noise)
         start_w_noise = np.random.randint(1, size - w_noise)
         noise_size = (h_noise, w_noise)
-        simplex_noise = self.simplexNoise.rand_3d_octaves((3, *noise_size), 9, 0.8)
+        simplex_noise = self.simplexNoise.rand_3d_octaves((3, *noise_size), self.simplex_params.octaves, self.simplex_params.persistence, self.simplex_params.frequency)
         init_noise = np.zeros((256, 256, 3))
         std = np.std(dem[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise])
-        init_noise[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise, :] = simplex_noise.transpose(1,2,0) * std * amplitude
+        init_noise[start_h_noise: start_h_noise + h_noise, start_w_noise: start_w_noise+w_noise, :] = simplex_noise.transpose(1,2,0) * std * self.simplex_params.amplitude
         dem_noise = dem + init_noise[:, :, 0]
         return dem_noise
     
-    def apply_flips(self, normal_img, noise_img):
+    def add_gaussian_noise(self, image, mean=0., std=0.1):
+        noise = torch.randn_like(image) * std + mean
+
+        return image + noise
+
+    def apply_variational_augs(self, DEM):
+        """
+            Apply slight gaussian blur and random noise to the DEM
+        """
+        # make tensor
+        DEM = torch.from_numpy(DEM).float().unsqueeze(0)
+        # apply gaussian blur
+        if random.random() < self.aug_params.p_blur:
+            DEM = F.gaussian_blur(DEM, kernel_size=(5, 5))
+        # apply random noise
+        if random.random() < self.aug_params.p_noise:
+            DEM = self.add_gaussian_noise(DEM)
+        # return as numpy array
+        return DEM.squeeze(0).numpy()
+ 
+    def apply_geometric_augs(self, normal_img, noise_img):
         """
             Apply random flips to the normal and noise image
         """
-        if random.random() > self.p_flip:
+        if random.random() < self.aug_params.p_flip:
             normal_img = F.hflip(normal_img)
             noise_img = F.hflip(noise_img)
-        if random.random() > self.p_flip:
+        if random.random() < self.aug_params.p_flip:
             normal_img = F.vflip(normal_img)
             noise_img = F.vflip(noise_img)
+        if random.random() < self.aug_params.p_rotate:
+            angle = random.randint(0, 360)
+            normal_img = F.rotate(normal_img, angle)
+            noise_img = F.rotate(noise_img, angle)
+        if random.random() < self.aug_params.p_crop:
+            scale = random.uniform(1.0, 1.3)
+            normal_img = F.affine(normal_img, angle=0, translate=[0, 0], scale=scale, shear=0)
+            noise_img = F.affine(noise_img, angle=0, translate=[0, 0], scale=scale, shear=0)
+        
         return normal_img, noise_img
     
     def __getitem__(self, index):
@@ -156,25 +205,37 @@ class train_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # remove the green and blue channels from the RGB (3rd and 4th channels in image)
-        image = np.concatenate((image[:, :, 0:2], image[:, :, 4:]), axis=2)
+        # if image only contains dem and therefore 2D
+        image = image[:, :, np.newaxis] if len(image.shape) == 2 else image
 
         # get dem, scale and create sobel dem
         dem = image[:, :, 0]
+        # add small amounts of 'natural noise' to dem (blur and noise)
+        if self.transform_fn:
+            dem = self.apply_variational_augs(dem)
+
         dem_min = np.percentile(dem, 1)
         dem_max = np.percentile(dem, 99)
         # scale dem in image
-        image[:, :, 0] = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        dem = np.clip((dem - dem_min) / (dem_max - dem_min), 0, 1)
+        image[:, :, 0] = dem
         # insert sobel after dem in image
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
-        
         image = np.concatenate([image[:, :, 0:1], sobel_dem[:, :, np.newaxis], image[:, :, 1:]], axis=2)
-        image[:, :, 2] = image[:, :, 2] / 255
 
+        if self.in_channels >= 3:
+            # Process RGB
+            # remove the green and blue channels from the RGB (4rd and 5th channels in image)
+            image = np.concatenate((image[:, :, 0:3], image[:, :, 5:]), axis=2)
+            image[:, :, 2] = image[:, :, 2] / 255
+
+        # Process spectral channels
         for i in range(3, self.in_channels):
             image[:, :, i] = (image[:, :, i] - meta["min_vals"][i+1]) / (meta["max_vals"][i+1] - meta["min_vals"][i+1])
 
+        # delete remaining channels (after > in_channels)
+        image = image[:, :, :self.in_channels]
         normal_image = torch.from_numpy(image).float().permute(2, 0, 1)
         
         # randomly choose either case 1 or 2 psuedo-artefact
@@ -182,19 +243,24 @@ class train_dataset(Dataset):
         if choice == 1:
             dem_noise = self.get_psuedo_case1(dem)
         elif choice == 2:
-            dem_noise = self.get_psuedo_case2(dem, amplitude=0.7)
+            dem_noise = self.get_psuedo_case2(dem)
 
         image_noise = image.copy()
         sobel_noise = ndimage.sobel(dem_noise)
         sobel_noise = (sobel_noise - sobel_noise.min()) / (sobel_noise.max() - sobel_noise.min())
         image_noise[:, :, 0] = dem_noise
         image_noise[:, :, 1] = sobel_noise
-
+        
         img_noise = torch.from_numpy(image_noise).float().permute(2, 0, 1)
+
+        # repeat DEM
+        if self.in_channels == 2:
+            normal_image = torch.concat([normal_image, normal_image[0].unsqueeze(0)], dim=0)
+            img_noise = torch.concat([img_noise, img_noise[0].unsqueeze(0)], dim=0)
         
         # apply flips
         if self.transform_fn:
-            normal_image, img_noise = self.apply_flips(normal_image, img_noise)
+            normal_image, img_noise = self.apply_geometric_augs(normal_image, img_noise)
 
         # normalize
         if self.normalize:
@@ -217,8 +283,8 @@ class train_dataset(Dataset):
 
         #print(normal_image)
         #print(img_noise)
-        #plot_channels(normal_image, "Normal Image Channels")
-        #plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
+        plot_channels(normal_image, "Normal Image Channels")
+        plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
 
         return input
     
@@ -237,10 +303,12 @@ class test_dataset(Dataset):
         imagenet_std = [0.229, 0.224, 0.225]
         self.in_channels = in_channels
 
-        # repeat above norms and std for each in channel
-        mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
-        std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
-        self.normalize = transforms.Normalize(mean=mean, std=std)
+        if self.in_channels > 3:
+            # repeat above norms and std for each in channel
+            imagenet_mean = imagenet_mean * (self.in_channels // 3) + imagenet_mean[:self.in_channels % 3]
+            imagenet_std = imagenet_std * (self.in_channels // 3) + imagenet_std[:self.in_channels % 3]
+
+        self.normalize = transforms.Normalize(mean=imagenet_mean, std=imagenet_std)
 
         # construct metas
         with open(meta_file, "r") as f_r:
@@ -262,9 +330,9 @@ class test_dataset(Dataset):
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
 
-        # remove the green and blue channels from the RGB (3rd and 4th channels in image)
-        image = np.concatenate((image[:, :, 0:2], image[:, :, 4:]), axis=2)
-
+        # if image only contains dem and therefore 2D
+        image = image[:, :, np.newaxis] if len(image.shape) == 2 else image
+        
         # get dem, scale and create sobel dem
         dem = image[:, :, 0]
         dem_min = np.percentile(dem, 1)
@@ -274,14 +342,24 @@ class test_dataset(Dataset):
         # insert sobel after dem in image
         sobel_dem = ndimage.sobel(dem)
         sobel_dem = (sobel_dem - sobel_dem.min()) / (sobel_dem.max() - sobel_dem.min())
-        
         image = np.concatenate([image[:, :, 0:1], sobel_dem[:, :, np.newaxis], image[:, :, 1:]], axis=2)
-        image[:, :, 2] = image[:, :, 2] / 255
+
+        if self.in_channels >= 3:
+            # Process RGB
+            # remove the green and blue channels from the RGB (4rd and 5th channels in image)
+            image = np.concatenate((image[:, :, 0:3], image[:, :, 5:]), axis=2)
+            image[:, :, 2] = image[:, :, 2] / 255
 
         for i in range(3, self.in_channels):
             image[:, :, i] = (image[:, :, i] - meta["min_vals"][i+1]) / (meta["max_vals"][i+1] - meta["min_vals"][i+1])
 
+        # delete remaining channels (after > in_channels)
+        image = image[:, :, :self.in_channels]
         image = torch.from_numpy(image).float().permute(2, 0, 1)
+
+        # repeat DEM
+        if self.in_channels == 2:
+            image = torch.concat([image, image[0].unsqueeze(0)], dim=0)
 
         input.update(
             {

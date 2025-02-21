@@ -7,7 +7,7 @@ from torchvision import transforms
 from model.resnet import wide_resnet50_2, resnet50, wide_resnet101_2, resnet18
 from model.de_resnet import de_wide_resnet50_2, de_resnet50, de_wide_resnet101_2, de_resnet18
 from data.DL_RD import CustomDataset
-from data.DL_Contrast import train_dataset, test_dataset
+from data.DL_Contrast import train_dataset, test_dataset, AugmentationParams, SimplexNoiseParams
 
 import os
 
@@ -56,15 +56,28 @@ def get_loaders_proj(params, test=False):
         in_channels=params.get("channels", 3)
     )
     test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
+    # only return train loader if not in "test" mode (testing or inference)
     if not test:
+        aug_params = AugmentationParams(
+            **{k: v for k, v in params.items() 
+            if k in ['p_flip', 'p_rotate', 'p_crop', 'p_noise', 'p_blur']}
+        )
+
+        simplex_params = SimplexNoiseParams(
+            **{k: v for k, v in params.items() 
+            if k in ['p_simplex', 'simplex_scale', 'simplex_noise']}
+        )
+
         train_data = train_dataset(
             meta_file=params["meta_path_train"], 
             data_path=params["data_path"], 
-            transform_fn=True,
-            p_flip=params.get("flip", 0.5),
+            transform_fn=params.get("transforms", False),
+            aug_params=aug_params,
+            simplex_params=simplex_params,
             resize_dim=(params["resize_x"], params["resize_y"]), 
             in_channels=params.get("channels", 3)
         )
+
         train_loader = DataLoader(
             train_data, 
             batch_size=params["batch_size"], 

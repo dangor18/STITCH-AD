@@ -136,9 +136,9 @@ def train(params, train_loader, test_loader, device):
             model.proj_scheduler.step(metrics=total_auroc)
     
     # test best model after training and plot results
-    test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
-                    feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
-    plot_auroc(auroc_dict)
+    #test_RD(model, test_loader, device, model_path=params["model_path"], score_weight=params.get("score_weight"), 
+    #                feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))
+    #plot_auroc(auroc_dict)
     return best_auroc, best_epoch
 
 def write_to_file(study, trial):
@@ -160,12 +160,12 @@ def objective(trial, config_path):
         params = yaml.safe_load(ymlfile)
 
     # objective function params
-    params["proj_lr"] = trial.suggest_float("proj_lr", low=1e-4, high=1e-1, log=True)
-    params["distill_lr"] = trial.suggest_float("distill_lr", low=1e-4, high=1e-1, log=True)
+    #params["proj_lr"] = trial.suggest_float("proj_lr", low=1e-4, high=1e-1, log=True)
+    #params["distill_lr"] = trial.suggest_float("distill_lr", low=1e-4, high=1e-1, log=True)
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
     params["beta1_proj"] = trial.suggest_categorical("beta1_proj", [0.5, 0.9])
-    params["beta1_distill"] = trial.suggest_categorical("beta1_distill", [0.9, 0.9999])
+    params["beta1_distill"] = trial.suggest_categorical("beta1_distill", [0.5, 0.9])
 
     params["feature_weight1"] = trial.suggest_float("feature_weight1", low=0.5, high=1.5)
     params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
@@ -178,12 +178,16 @@ def objective(trial, config_path):
     params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
     params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
 
+    params["simplex_octaves"] = trial.suggest_int("simplex_octaves", low=2, high=10)
+    params["simplex_amp"] = trial.suggest_float("simplex_amp", low=0.1, high=1.5)
+    params["simplex_freq"] = trial.suggest_categorical("simplex_freq", [8, 16, 32, 64])
+    params["simplex_presistence"] = trial.suggest_float("simplex_persistence", low=0.1, high=1.5)
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
     cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
     parser = ArgumentParser(description="")
-    parser.add_argument("--config", "-c", default=os.path.join(cwd, "configs/contrast_config.yaml"), required=False)
+    parser.add_argument("--config", "-c", default=os.path.join(cwd, "configs", "contrast_config.yaml"), required=False)
     parser.add_argument("num_trials", type=int, nargs='?', help="Number of trials for hyperparameter tuning")
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
@@ -193,7 +197,7 @@ if __name__ == '__main__':
     if args.tune and args.num_trials is None:
         parser.error("--tune requires num_trials to be specified")
 
-    config = os.path.join(cwd, args.config)
+    config = os.path.join(cwd, "configs", args.config)
 
     os.makedirs("logs", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
