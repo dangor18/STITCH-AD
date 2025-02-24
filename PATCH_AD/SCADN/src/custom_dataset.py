@@ -139,8 +139,8 @@ def load_data(opt):
 
     
 
-    train_metadata = os.path.join(opt.dataroot, f'metadata/{opt.train_meta}')
-    test_metadata = os.path.join(opt.dataroot, f'metadata/{opt.test_meta}')
+    train_metadata = os.path.join(opt.dataroot, 'metadata', opt.train_meta)
+    test_metadata = os.path.join(opt.dataroot, 'metadata', opt.test_meta)
 
     splits = ['train', 'test', 'train4val']
 
@@ -169,7 +169,6 @@ def load_data(opt):
         transform = transforms.Compose([transforms.Resize(opt.INPUT_SIZE),
                                         transforms.CenterCrop(opt.INPUT_SIZE),
                                         transforms.Normalize(mean=means, std=stds), ])
-
 
     dataset = {x: StitchoDataset(meta_file=splits2metadata[x], transform_fn=transform, resize_dim=(opt.INPUT_SIZE, opt.INPUT_SIZE), dataroot=opt.dataroot) for x in splits}
 
