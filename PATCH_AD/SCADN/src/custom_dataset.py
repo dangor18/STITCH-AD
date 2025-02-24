@@ -12,6 +12,7 @@ from torchvision import transforms
 import json
 from torch import from_numpy
 from sklearn.model_selection import train_test_split
+from scipy import ndimage
 
 class StitchoDataset(Dataset):
     def __init__(
@@ -67,6 +68,27 @@ class StitchoDataset(Dataset):
 
         if self.resize_dim:
             image = cv2.resize(image, self.resize_dim)
+
+        # add extra sobel-filtered layer
+        sobel = ndimage.sobel(image[:, :, 0])
+        sobel = np.expand_dims(sobel, axis=2)
+        image = np.concatenate((image, sobel), axis=2)
+
+        # scale layers to 0-1
+        for i in range(image.shape[2]):
+            min = np.min(image[:, :, i])
+            max = np.max(image[:, :, i])
+            image[:, :, i] = (image[:, :, i] - min) / (max - min)
+
+        # # use numpy to show each layer in the image
+        # num_images = image.shape[2]
+        # fig, axes = plt.subplots(1, num_images, figsize=(15, 5))
+        # for i in range(num_images):
+        #     print(f'layer {i}: {np.min(image[:, :, i])} - {np.max(image[:, :, i])}')
+        #     axes[i].imshow(image[:, :, i])
+        #     axes[i].axis('off')
+        # plt.show()
+        # exit()
         
         input.update(
             {
@@ -117,8 +139,8 @@ def load_data(opt):
 
     
 
-    train_metadata = os.path.join(opt.dataroot, f'metadata/{opt.train_meta}')
-    test_metadata = os.path.join(opt.dataroot, f'metadata/{opt.test_meta}')
+    train_metadata = os.path.join(opt.dataroot, 'metadata', opt.train_meta)
+    test_metadata = os.path.join(opt.dataroot, 'metadata', opt.test_meta)
 
     splits = ['train', 'test', 'train4val']
 
@@ -129,17 +151,24 @@ def load_data(opt):
     drop_last_batch = {'train': True, 'test': False, 'train4val': False}
     shuffle = {'train': True, 'test': False, 'train4val': False}
 
+    imagenet_mean = [0.485, 0.456, 0.406]
+    imagenet_std = [0.229, 0.224, 0.225]
+
+    num_channels = opt.INPUT_CHANNELS
+
+    means = imagenet_mean * (num_channels // 3) + imagenet_mean[:num_channels % 3]
+    stds = imagenet_std * (num_channels // 3) + imagenet_std[:num_channels % 3]
+
     if opt.MODIFIED:
         print('modified')
         transform = transforms.Compose([transforms.Resize(opt.INPUT_SIZE),
                                         transforms.CenterCrop(opt.INPUT_SIZE),
                                         transforms.RandomRotation(degrees=45),
-                                        transforms.Normalize((0.5), (0.5)), ])
+                                        transforms.Normalize(mean=means, std=stds), ])
     else:
         transform = transforms.Compose([transforms.Resize(opt.INPUT_SIZE),
                                         transforms.CenterCrop(opt.INPUT_SIZE),
-                                        transforms.Normalize((0.5), (0.5)), ])
-
+                                        transforms.Normalize(mean=means, std=stds), ])
 
     dataset = {x: StitchoDataset(meta_file=splits2metadata[x], transform_fn=transform, resize_dim=(opt.INPUT_SIZE, opt.INPUT_SIZE), dataroot=opt.dataroot) for x in splits}
 
