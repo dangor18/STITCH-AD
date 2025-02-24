@@ -1,11 +1,11 @@
-data_path: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/
-meta_path_train: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/train_metadata.json
-meta_path_test: PRE_PROCESS/DATA/PATCHES/DRGB_INF_TEST/metadata/all_metadata.json
+data_path: PRE_PROCESS/DATA/PATCHES/INF_DEM_172/
+meta_path_train: PRE_PROCESS/DATA/PATCHES/INF_DEM_172/metadata/train_metadata.json
+meta_path_test: PRE_PROCESS/DATA/PATCHES/INF_DEM_172/metadata/all_metadata.json
 resize_x: 256
 resize_y: 256
-channels: 3
+channels: 2
 
-checkpoint: checkpoints/RevisitingRDTuned.pth
+checkpoint: checkpoints/DEM_50_172_no1676-1996-2057-2849.pth
 # relevent model parameters for inference
 architecture: "wide_resnet50_2"
 bn_attention: False

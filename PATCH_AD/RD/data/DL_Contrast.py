@@ -283,8 +283,8 @@ class train_dataset(Dataset):
 
         #print(normal_image)
         #print(img_noise)
-        plot_channels(normal_image, "Normal Image Channels")
-        plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
+        #plot_channels(normal_image, "Normal Image Channels")
+        #plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
 
         return input
     

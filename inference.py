@@ -29,10 +29,10 @@ gt_dict = {
     "2227": 1,
     "2228": 1,
     "2240": 1,
-    "2848": 1,
+    "2849": -1,
 }
 
-def get_scores(model_type, params, device):
+def get_scores(model_type, params, device='cuda'):
     """
         Return anomaly scores, location, and gt label for patches for each orchard in a dictionary
         ARGS:
@@ -42,7 +42,7 @@ def get_scores(model_type, params, device):
     """
     # check if json file exists
     if os.path.exists(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json"):
-        with open(f"ORCHARD_AD/checkpoint/{model_type}_score_dict.json", "r") as f:
+        with open(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json", "r") as f:
             return json.load(f)
     
     start_time = time.time()
@@ -212,7 +212,7 @@ def infer_dbscan(params, score_dict):
     return pr_dict, normal_cm, anomalous_cm
 
 
-def tune_dbscan(params, trial):
+def tune_dbscan(params, score_dict, trial):
     '''
         Perform orchard level inference using DBSCAN clustering
         ARGS:
@@ -220,8 +220,6 @@ def tune_dbscan(params, trial):
             score_dict: dictionary containing the scores for each patch for each orchard
     '''
     pr_dict = {}
-    with open(f"data/{params['model_type']}_score_dict.json", "r") as f:
-        score_dict = json.load(f)
     # initialize confusion matrices
     total_cm = np.zeros((2, 2))
 
@@ -286,17 +284,8 @@ def tune_dbscan(params, trial):
     
     return get_F1(total_cm)
 
-def objective(trial):
-    parser = ArgumentParser(description="")
-    parser.add_argument("--config", default="configs/inference.yaml", required=False)
-    parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
-    args = parser.parse_args()
-
-    config = args.config
-    # open config
-    with open(config, "r") as ymlfile:
-        params = yaml.safe_load(ymlfile)
-
+def objective(trial, params, model_type):
+    score_dict = get_scores(model_type, params)
     # parameters to tune HDBSCAN
     params["min_cluster_size"] = trial.suggest_int("min_cluster_size", low=3, high=10)
     params["min_samples"] = trial.suggest_int("min_samples", low=3, high=10)
@@ -304,7 +293,7 @@ def objective(trial):
     params["alpha"] = trial.suggest_float("alpha", low=0.1, high=1.5)
     params["v_thresh"] = trial.suggest_float("v_thresh", low=1.0, high=2.5)
 
-    return tune_dbscan(params, trial)
+    return tune_dbscan(params, score_dict, trial)
 
 def get_F1(cm):
     """
@@ -341,6 +330,7 @@ def print_results(pr_dict, normal_cm, anomalous_cm):
     #print("NORMAL ORCHARD F1 SCORE:", get_F1(normal_cm))
 
 if __name__ == "__main__":
+    os.makedirs("ORCHARD_AD/checkpoints", exist_ok=True)
     config_dir = "ORCHARD_AD/configs/"
     arg_parser = ArgumentParser()
     arg_parser.add_argument("--orchard_config", "-oc", type=str, default="orchard_level_config.yaml")
@@ -362,10 +352,11 @@ if __name__ == "__main__":
         with open(model_config_path, "r") as f:
             model_params = yaml.safe_load(f)
 
-    # tune the orchard level models WIP
+    # tune the orchard level models (assumes the json file exists)
     if args.tune:
+        objective_w_params = lambda trial: objective(trial, orchard_params, model_type)
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective, n_trials=1500)
+        study.optimize(objective_w_params, n_trials=1500)
         print(study.best_params)
         print(study.best_value)
         exit()

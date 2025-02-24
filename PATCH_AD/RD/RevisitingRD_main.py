@@ -160,8 +160,8 @@ def objective(trial, config_path):
         params = yaml.safe_load(ymlfile)
 
     # objective function params
-    #params["proj_lr"] = trial.suggest_float("proj_lr", low=1e-4, high=1e-1, log=True)
-    #params["distill_lr"] = trial.suggest_float("distill_lr", low=1e-4, high=1e-1, log=True)
+    params["proj_lr"] = trial.suggest_float("proj_lr", low=1e-4, high=1e-1, log=True)
+    params["distill_lr"] = trial.suggest_float("distill_lr", low=1e-4, high=1e-1, log=True)
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
     #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
     params["beta1_proj"] = trial.suggest_categorical("beta1_proj", [0.5, 0.9])
@@ -244,3 +244,6 @@ if __name__ == '__main__':
         # train
         best_auroc, best_epoch = train(params, train_loader, test_loader, device)
         print(f"[INFO] BEST OVERALL AUROC: {best_auroc:.5f} AT EPOCH {best_epoch}")
+        with open(params["log_path"], "a") as log_file:
+            log_file.write(f"************************\n")
+            log_file.write(f"\nBEST OVERALL AUROC: {best_auroc:.5f} AT EPOCH {best_epoch}")

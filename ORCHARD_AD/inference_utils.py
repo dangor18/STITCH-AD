@@ -120,6 +120,8 @@ def get_scores_UniAD(model, data_loader, params, device):
             cls_name, lbl = input["clsname"][0], input["label"][0].item()   # cls_name either "all" or orchard id
             # libraries used prefer -1 for anomalous and 1 for normal
             if lbl == 0:
+                lbl = 1
+            elif lbl == 1:
                 lbl = -1
 
             x, y = input['x'].item(), input['y'].item()     # get x y location for patch from DL
@@ -160,7 +162,10 @@ def get_scores_RD(model, data_loader, params, device):
         for input in tqdm(data_loader):
             cls_name, lbl = input["clsname"][0], input["label"][0].item()   # cls_name either "all" or orchard id
             # libraries used prefer -1 for anomalous and 1 for normal
+            #print(lbl)
             if lbl == 0:
+                lbl = 1
+            elif lbl == 1:
                 lbl = -1
 
             patch = input['image'].to(device)
