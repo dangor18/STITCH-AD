@@ -96,9 +96,8 @@ def remove_small_segments(masks: list, image_shape: tuple, image: np.ndarray,
             ).astype(bool)
             
         segment_ratio = np.sum(segment) / total_pixels
-        
         # Only check size ratios
-        if (segment_ratio >= min_size) or (0.8 >= segment_ratio >= min_size):
+        if (0.8 >= segment_ratio >= min_size):
             valid_segments.append(segment)
     
     # Combine valid segments with erosion
@@ -111,45 +110,57 @@ def remove_small_segments(masks: list, image_shape: tuple, image: np.ndarray,
     
     return combined
 
-def process_segment(args):
-    """Process a single segment checking only for nodata pixels."""
-    label, segment, alpha_mask, max_percentage = args
-    
-    # Check alpha channel for nodata (0 values)
-    segment_alpha_zeros = np.sum(segment & (alpha_mask == 0))
-    segment_size = np.sum(segment)
-    
-    if segment_size > 0 and (segment_alpha_zeros / segment_size) > max_percentage:
-        return label
-        
-    return None
-
 def remove_nodata_segments(mask: np.ndarray, image: np.ndarray, **kwargs) -> np.ndarray:
-    """Remove segments with excessive no-data pixels."""
-    max_nodata = kwargs.get('max_nodata_percentage', 0.3)
-    threads = kwargs.get('num_threads', 4)
+    """
+    Remove segments with excessive no-data pixels in their alpha channel projection.
     
-    # Ensure image is in correct format
+    Args:
+        mask (np.ndarray): Binary mask of segments
+        image (np.ndarray): RGB(A) image
+        **kwargs: Additional arguments including max_nodata_percentage
+        
+    Returns:
+        np.ndarray: Processed mask with invalid segments removed
+    """
+    max_nodata = kwargs.get('max_nodata_percentage', 0.3)
+    
+    # Ensure image is in correct format (HWC)
     if len(image.shape) == 3 and image.shape[0] in [3, 4]:
         image = image.transpose(1, 2, 0)
     
-    # Label connected components
-    labeled, num_features = ndimage.label(mask)
-    
-    # Get alpha channel (assume it's the last channel)
+    # Get alpha channel
     alpha_channel = image[:, :, -1] if image.shape[-1] == 4 else np.ones_like(mask) * 255
     
-    # Create list of segments
-    segments = [labeled == i for i in range(1, num_features + 1)]
+    # Label connected components
+    labeled, num_features = ndimage.label(mask)
+    if num_features == 0:
+        return mask
     
-    args = [(i+1, seg, alpha_channel, max_nodata) 
-            for i, seg in enumerate(segments)]
+    # Process each segment
+    kernel = np.ones((3, 3), dtype=bool)  # For dilation
+    segments_to_remove = []
     
-    with ThreadPoolExecutor(max_workers=threads) as executor:
-        results = list(executor.map(process_segment, args))
+    for i in range(1, num_features + 1):
+        segment = labeled == i
+        # Dilate segment
+        dilated_segment = ndimage.binary_dilation(segment, structure=kernel)
+        
+        # Get alpha channel values for dilated segment
+        alpha_projection = alpha_channel[dilated_segment]
+        
+        # Calculate ratio of zero values in alpha projection
+        num_zeros = np.sum(alpha_projection == 0)
+        total_pixels = len(alpha_projection)
+        
+        print(f"Segment {i}: {num_zeros} / {total_pixels} = {num_zeros / total_pixels:.2%}")
+        if total_pixels > 0 and (num_zeros / total_pixels) > max_nodata:
+            segments_to_remove.append(i)
     
     # Remove invalid segments
-    mask[np.isin(labeled, [r for r in results if r is not None])] = 0
+    for label in segments_to_remove:
+        mask[labeled == label] = False
+    
+    print(f"Removed {len(segments_to_remove)} segments due to nodata")
     return mask
 
 def segment_image(image: np.ndarray, mask_generator, **kwargs) -> list:
@@ -195,31 +206,46 @@ def keep_largest_segment(mask):
     else:
         return mask
 
-def remove_outliers(mask: np.ndarray, image: np.ndarray, threshold: float = 1.5) -> np.ndarray:
-    """Remove segments with anomalous RGB statistics."""
+def remove_outliers(mask: np.ndarray, image: np.ndarray, threshold: float = 1.5, small_segment_threshold = 0.004) -> np.ndarray:
+    """Remove segments with anomalous RGB statistics and small segments."""
     labeled, num_features = ndimage.label(mask)
     if num_features == 0:
         return mask
         
     image = image.transpose(1, 2, 0) if len(image.shape) == 3 and image.shape[0] in [3, 4] else image
+    total_pixels = mask.shape[0] * mask.shape[1]
     
     # Calculate segment statistics
     stats_list = []
+    segments_to_remove = []
+    
     for i in range(1, num_features + 1):
         segment = labeled == i
+        segment_ratio = np.sum(segment) / total_pixels
+        
+        # Check size ratio first
+        if segment_ratio < small_segment_threshold:  # Using same threshold as in remove_small_segments
+            segments_to_remove.append(i)
+            continue
+            
         pixels = image[segment]
         if len(pixels) > 0:
-            stats_list.append(np.std(pixels[:, :3], axis=0))
+            stats_list.append((i, np.std(pixels[:, :3], axis=0)))
     
-    if not stats_list:
-        return mask
+    if stats_list:
+        # Convert stats to array for zscore calculation
+        segment_ids, stats_array = zip(*stats_list)
+        stats_array = np.array(stats_array)
         
-    # Remove outlier segments
-    outliers = np.any(stats.zscore(np.array(stats_list), axis=0) < -threshold, axis=1)
-    for i, is_outlier in enumerate(outliers):
-        if is_outlier:
-            mask[labeled == (i + 1)] = False
+        # Remove statistical outliers
+        outliers = np.any(stats.zscore(stats_array, axis=0) < -threshold, axis=1)
+        segments_to_remove.extend([segment_ids[i] for i, is_outlier in enumerate(outliers) if is_outlier])
     
+    # Remove all invalid segments at once
+    for label in segments_to_remove:
+        mask[labeled == label] = False
+    
+    print(f"Removed {len(segments_to_remove)} segments ({len(segments_to_remove) - len(stats_list)} small, {len(stats_list)} statistical outliers)")
     return mask
 
 def extract_uog_id(filepath):
@@ -370,7 +396,7 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     
     print("  → Removing statistical outliers...")
     outlier_start = time.time()
-    final_mask = remove_outliers(cleaned_mask, image, config['segmentation']['outlier_threshold'])
+    final_mask = remove_outliers(cleaned_mask, image, config['segmentation']['outlier_threshold'], config['segmentation']['min_segment_size'])
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
     if config.get('save_debug', False):
@@ -384,8 +410,9 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     # Validation check
     print("  → Validating segmentation coverage...")
     validation_start = time.time()
-    area_ratio = np.sum(final_mask) / (255 * final_mask.shape[0] * final_mask.shape[1])
-    if area_ratio < 0.15:
+    area_ratio = np.sum(final_mask) / (final_mask.shape[0] * final_mask.shape[1])
+    print(f'Area ratio: {area_ratio}')
+    if area_ratio < 0.1:
         print(f"    ✗ Insufficient segmented area: {area_ratio:.1%}")
         return False, image, output_profile
     print(f"    ✓ Completed in {time.time() - validation_start:.1f}s")

@@ -12,7 +12,7 @@ downscaling:
 # Segmentation settings
 segmentation:
   sam_target_size: [1024, 1024]
-  min_segment_size: 0.01
+  min_segment_size: 0.004
   pixel_value_threshold: 0.3
   max_nodata_percentage: 0.0001
   outlier_threshold: 1.3
