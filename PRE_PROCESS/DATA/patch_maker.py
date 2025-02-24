@@ -56,6 +56,10 @@ def process_patch(args):
     case_1_count = np.count_nonzero(mask_block == 1)
     case_2_count = np.count_nonzero(mask_block == 2)
     case_3_count = np.count_nonzero(mask_block == 3)
+
+    # ignore case 3 currently
+    if case_3_count > 0:
+        return
                     
     # check for anomaly cases
     if case_1_count > anomaly_threshold * block_size_x * block_size_y:
