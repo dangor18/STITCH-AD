@@ -123,6 +123,7 @@ def remove_nodata_segments(mask: np.ndarray, image: np.ndarray, **kwargs) -> np.
         np.ndarray: Processed mask with invalid segments removed
     """
     max_nodata = kwargs.get('max_nodata_percentage', 0.3)
+    boarder_size = kwargs.get('boarder_size', 10)
     
     # Ensure image is in correct format (HWC)
     if len(image.shape) == 3 and image.shape[0] in [3, 4]:
@@ -137,7 +138,7 @@ def remove_nodata_segments(mask: np.ndarray, image: np.ndarray, **kwargs) -> np.
         return mask
     
     # Process each segment
-    kernel = np.ones((3, 3), dtype=bool)  # For dilation
+    kernel = np.ones((boarder_size, boarder_size), dtype=bool)  # For dilation
     segments_to_remove = []
     
     for i in range(1, num_features + 1):
@@ -382,7 +383,7 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
         mask=combined_mask,
         image=image,
         max_nodata_percentage=config['segmentation']['max_nodata_percentage'],
-        num_threads=12
+        boarder_size = config['segmentation']['border_size'],
     )
     print(f"    ✓ Completed in {time.time() - nodata_start:.1f}s")
     

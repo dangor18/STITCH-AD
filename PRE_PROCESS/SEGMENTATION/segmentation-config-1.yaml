@@ -14,9 +14,9 @@ segmentation:
   sam_target_size: [1024, 1024]
   min_segment_size: 0.004
   pixel_value_threshold: 0.3
-  max_nodata_percentage: 0.0001
+  max_nodata_percentage: 0.00025
   outlier_threshold: 1.3
-  border_size: 50
+  border_size: 10
   nodata_value: [255, 255, 255, 0]
 
   # Initial segmentation settings
@@ -42,8 +42,8 @@ segmentation:
     crop_n_layers: 1
 
 # Processing control flags
-show_masks: True
-skip_enabled: True
+show_masks: False
+skip_enabled: False
 save_debug: True
-autumn_filtered: True
+autumn_filtered: False
 seed: 42
