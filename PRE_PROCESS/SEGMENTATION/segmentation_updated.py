@@ -153,7 +153,6 @@ def remove_nodata_segments(mask: np.ndarray, image: np.ndarray, **kwargs) -> np.
         num_zeros = np.sum(alpha_projection == 0)
         total_pixels = len(alpha_projection)
         
-        print(f"Segment {i}: {num_zeros} / {total_pixels} = {num_zeros / total_pixels:.2%}")
         if total_pixels > 0 and (num_zeros / total_pixels) > max_nodata:
             segments_to_remove.append(i)
     
@@ -267,6 +266,140 @@ def extract_uog_id(filepath):
     # If no numbers found, return None
     return None
 
+def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray, 
+                   small_segment_threshold=0.004, circularity_threshold=0.85, 
+                   z_score_threshold=-1.5, debug=True) -> np.ndarray:
+    """Remove segments with anomalous characteristics based on threshold image.
+    
+    Args:
+        mask: Binary mask containing segments to analyze
+        threshold_img: Thresholded vegetation image (binary or grayscale)
+        small_segment_threshold: Minimum size ratio for segments
+        circularity_threshold: Maximum circularity value (1.0 = perfect circle)
+        z_score_threshold: Threshold for vegetation density z-score
+        debug: Whether to print detailed debug information
+        
+    Returns:
+        Cleaned binary mask with outlier segments removed
+    """
+    from skimage.measure import regionprops
+    from scipy import stats, ndimage
+    
+    labeled, num_features = ndimage.label(mask)
+    if num_features == 0:
+        if debug:
+            print("No segments found in mask")
+        return mask
+    
+    if debug:
+        print(f"Processing {num_features} segments")
+        print(f"Threshold image shape: {threshold_img.shape}, min: {np.min(threshold_img)}, max: {np.max(threshold_img)}")
+    
+    total_pixels = mask.shape[0] * mask.shape[1]
+    segments_to_remove = []
+    small_segments = []
+    circular_segments = []
+    
+    # Calculate absolute minimum size in pixels
+    min_segment_size = small_segment_threshold * total_pixels
+    
+    if debug:
+        print(f"Minimum segment size: {min_segment_size:.1f} pixels ({small_segment_threshold:.6f} ratio)")
+    
+    # Collect statistics for all segments
+    segment_stats = []
+    segment_weights = []
+    
+    for i in range(1, num_features + 1):
+        segment = labeled == i
+        segment_pixels = np.sum(segment)
+        segment_ratio = segment_pixels / total_pixels
+        
+        if debug and i % 20 == 0:  # Print every 20th segment to avoid flooding console
+            print(f"Segment {i}: {segment_pixels} pixels, {segment_ratio:.6f} ratio")
+        
+        # Filter tiny segments
+        if segment_pixels < min_segment_size:
+            if debug and len(small_segments) < 5:  # Only print first 5
+                print(f"  Removing small segment {i}: {segment_pixels} pixels < {min_segment_size:.1f}")
+            small_segments.append(i)
+            segments_to_remove.append(i)
+            continue
+        
+        # Shape analysis - circularity
+        props = regionprops(segment.astype(np.uint8))[0]
+        circularity = 4 * np.pi * props.area / (props.perimeter**2) if props.perimeter > 0 else 0
+        
+        # Filter highly circular segments (likely water bodies)
+        if circularity > circularity_threshold:
+            if debug:
+                print(f"Segment {i}: High circularity {circularity:.4f} > {circularity_threshold}")
+            circular_segments.append(i)
+            segments_to_remove.append(i)
+            continue
+        
+        # Vegetation analysis from threshold image
+        veg_values = threshold_img[segment]
+        veg_mean = np.mean(veg_values)
+        veg_std = np.std(veg_values)
+        
+        if debug and i % 20 == 0:
+            print(f"Segment {i}: Vegetation mean {veg_mean:.4f}, std {veg_std:.4f}, circularity {circularity:.4f}")
+        
+        # Store statistics and use segment size as weight
+        segment_stats.append((i, veg_mean, veg_std, circularity))
+        segment_weights.append(segment_pixels)
+    
+    low_veg_segments = []
+    if segment_stats and len(segment_stats) > 1:
+        # Extract data for weighted statistical analysis
+        segment_ids = np.array([s[0] for s in segment_stats])
+        veg_means = np.array([s[1] for s in segment_stats])
+        veg_stds = np.array([s[2] for s in segment_stats])
+        weights = np.array(segment_weights)
+        
+        # Calculate weighted mean and std
+        weighted_mean = np.average(veg_means, weights=weights)
+        weighted_std = np.sqrt(np.average((veg_means - weighted_mean)**2, weights=weights))
+        
+        if debug:
+            print(f"Vegetation density: weighted mean {weighted_mean:.4f}, weighted std {weighted_std:.4f}")
+        
+        # Calculate z-scores
+        z_scores = (veg_means - weighted_mean) / (weighted_std + 1e-10)
+        
+        if debug:
+            # Show distribution of z-scores
+            z_bins = np.linspace(min(z_scores), max(z_scores), 10)
+            hist, _ = np.histogram(z_scores, bins=z_bins)
+            print(f"Z-score distribution: {hist}")
+            print(f"Z-score range: {min(z_scores):.2f} to {max(z_scores):.2f}")
+        
+        # Identify low vegetation segments (negative z-score)
+        low_veg_mask = z_scores < z_score_threshold
+        low_veg_segments = segment_ids[low_veg_mask].tolist()
+        
+        if debug:
+            print(f"Found {sum(low_veg_mask)} segments with z-score < {z_score_threshold}")
+            for idx in np.where(low_veg_mask)[0][:5]:  # Print first 5 outliers
+                seg_id = segment_ids[idx]
+                print(f"  Segment {seg_id}: z-score {z_scores[idx]:.2f}, veg mean {veg_means[idx]:.4f}")
+        
+        segments_to_remove.extend(low_veg_segments)
+    
+    # Remove all identified segments
+    segments_to_remove = list(set(segments_to_remove))  # Remove duplicates
+    for label in segments_to_remove:
+        mask[labeled == label] = False
+    
+    if debug:
+        print(f"Removed {len(segments_to_remove)} segments out of {num_features}:")
+        print(f"  - {len(small_segments)} small segments")
+        print(f"  - {len(circular_segments)} circular segments")
+        print(f"  - {len(low_veg_segments)} low vegetation segments")
+    
+    return mask
+
 def process_single_file(input_file, output_dir, config, mask_generator, preprocess=True):
     """Process a single input file with progress tracking and timing information."""
     start_time = time.time()
@@ -337,11 +470,8 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     # Segmentation phase
     print("→ Running segmentation...")
     seg_start = time.time()
-    
-    if preprocess:
-        sam_image = create_threshold_mask(image, output_dir)
-    else:
-        sam_image = image[:, :, :3] if image.shape[2] == 4 else image
+    threshold_image = create_threshold_mask(image, output_dir)
+    sam_image = threshold_image if preprocess else image[:, :, :3] if image.shape[2] == 4 else image
     
     # Get SAM masks
     masks = segment_image(
@@ -397,7 +527,7 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     
     print("  → Removing statistical outliers...")
     outlier_start = time.time()
-    final_mask = remove_outliers(cleaned_mask, image, config['segmentation']['outlier_threshold'], config['segmentation']['min_segment_size'])
+    final_mask = remove_outliers(cleaned_mask, threshold_image, circularity_threshold=0.85, z_score_threshold=config['segmentation']['outlier_threshold'], small_segment_threshold=config['segmentation']['min_segment_size'])
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
     if config.get('save_debug', False):

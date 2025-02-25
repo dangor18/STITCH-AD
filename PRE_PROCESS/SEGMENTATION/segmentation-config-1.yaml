@@ -15,7 +15,7 @@ segmentation:
   min_segment_size: 0.004
   pixel_value_threshold: 0.3
   max_nodata_percentage: 0.00025
-  outlier_threshold: 1.3
+  outlier_threshold: -1.3
   border_size: 10
   nodata_value: [255, 255, 255, 0]
 
@@ -25,7 +25,7 @@ segmentation:
     model_type: "vit_b"
     points_per_side: 32
     pred_iou_thresh: 0.08
-    stability_score_thresh: 0.85
+    stability_score_thresh: 0.8
     box_nms_thresh: 0.4
     crop_nms_thresh: 0.4
     crop_n_layers: 0
