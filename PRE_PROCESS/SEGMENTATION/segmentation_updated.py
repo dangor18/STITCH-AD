@@ -206,47 +206,6 @@ def keep_largest_segment(mask):
     else:
         return mask
 
-def remove_outliers(mask: np.ndarray, image: np.ndarray, threshold: float = 1.5, small_segment_threshold = 0.004) -> np.ndarray:
-    """Remove segments with anomalous RGB statistics and small segments."""
-    labeled, num_features = ndimage.label(mask)
-    if num_features == 0:
-        return mask
-        
-    image = image.transpose(1, 2, 0) if len(image.shape) == 3 and image.shape[0] in [3, 4] else image
-    total_pixels = mask.shape[0] * mask.shape[1]
-    
-    # Calculate segment statistics
-    stats_list = []
-    segments_to_remove = []
-    
-    for i in range(1, num_features + 1):
-        segment = labeled == i
-        segment_ratio = np.sum(segment) / total_pixels
-        
-        # Check size ratio first
-        if segment_ratio < small_segment_threshold:  # Using same threshold as in remove_small_segments
-            segments_to_remove.append(i)
-            continue
-            
-        pixels = image[segment]
-        if len(pixels) > 0:
-            stats_list.append((i, np.std(pixels[:, :3], axis=0)))
-    
-    if stats_list:
-        # Convert stats to array for zscore calculation
-        segment_ids, stats_array = zip(*stats_list)
-        stats_array = np.array(stats_array)
-        
-        # Remove statistical outliers
-        outliers = np.any(stats.zscore(stats_array, axis=0) < -threshold, axis=1)
-        segments_to_remove.extend([segment_ids[i] for i, is_outlier in enumerate(outliers) if is_outlier])
-    
-    # Remove all invalid segments at once
-    for label in segments_to_remove:
-        mask[labeled == label] = False
-    
-    print(f"Removed {len(segments_to_remove)} segments ({len(segments_to_remove) - len(stats_list)} small, {len(stats_list)} statistical outliers)")
-    return mask
 
 def extract_uog_id(filepath):
     """Extract UOG ID from filepath or generate a sequential one if not found."""
@@ -313,10 +272,6 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
     for i in range(1, num_features + 1):
         segment = labeled == i
         segment_pixels = np.sum(segment)
-        segment_ratio = segment_pixels / total_pixels
-        
-        if debug and i % 20 == 0:  # Print every 20th segment to avoid flooding console
-            print(f"Segment {i}: {segment_pixels} pixels, {segment_ratio:.6f} ratio")
         
         # Filter tiny segments
         if segment_pixels < min_segment_size:
@@ -342,9 +297,6 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         veg_values = threshold_img[segment]
         veg_mean = np.mean(veg_values)
         veg_std = np.std(veg_values)
-        
-        if debug and i % 20 == 0:
-            print(f"Segment {i}: Vegetation mean {veg_mean:.4f}, std {veg_std:.4f}, circularity {circularity:.4f}")
         
         # Store statistics and use segment size as weight
         segment_stats.append((i, veg_mean, veg_std, circularity))
@@ -378,12 +330,6 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         # Identify low vegetation segments (negative z-score)
         low_veg_mask = z_scores < z_score_threshold
         low_veg_segments = segment_ids[low_veg_mask].tolist()
-        
-        if debug:
-            print(f"Found {sum(low_veg_mask)} segments with z-score < {z_score_threshold}")
-            for idx in np.where(low_veg_mask)[0][:5]:  # Print first 5 outliers
-                seg_id = segment_ids[idx]
-                print(f"  Segment {seg_id}: z-score {z_scores[idx]:.2f}, veg mean {veg_means[idx]:.4f}")
         
         segments_to_remove.extend(low_veg_segments)
     
@@ -527,7 +473,7 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     
     print("  → Removing statistical outliers...")
     outlier_start = time.time()
-    final_mask = remove_outliers(cleaned_mask, threshold_image, circularity_threshold=0.85, z_score_threshold=config['segmentation']['outlier_threshold'], small_segment_threshold=config['segmentation']['min_segment_size'])
+    final_mask = remove_outliers(cleaned_mask, threshold_image, debug=save_debug_image, circularity_threshold=0.85, z_score_threshold=config['segmentation']['outlier_threshold'], small_segment_threshold=config['segmentation']['min_segment_size'])
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
     if config.get('save_debug', False):
