@@ -360,6 +360,8 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
     Returns:
         Cleaned binary mask with only dominant cluster segments
     """
+    debug = True
+    
     from scipy import ndimage
     from skimage.measure import regionprops
     from sklearn.cluster import KMeans
@@ -383,6 +385,16 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         segment = labeled == i
         area = np.sum(segment)
         
+        area_ratio = area / total_mask_area
+        if area_ratio < 0.01:
+            area_bin = 0.25
+        elif area_ratio < 0.05:
+            area_bin = 0.5
+        elif area_ratio < 0.1:
+            area_bin = 0.75
+        else:
+            area_bin = 1
+        
         # Skip tiny segments
         if area < min_segment_size:
             continue
@@ -395,18 +407,20 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         veg_mean = np.mean(veg_values)
         veg_std = np.std(veg_values)
         
+        # normalise:
+        veg_mean = (veg_mean - 0) / (255 - 0) * 10
+        veg_std = (veg_std - 0) / (255 - 0)
+        
         # Calculate circularity
         circularity = 4 * np.pi * props.area / (props.perimeter**2) if props.perimeter > 0 else 0
         
         # Store segment features
         segments_data.append({
             'id': i,
-            'area': area,
+            'area': area_bin,
             'veg_mean': veg_mean,
             'veg_std': veg_std,
             'circularity': circularity,
-            'eccentricity': props.eccentricity,
-            'solidity': props.solidity
         })
     
     if not segments_data:
@@ -419,17 +433,17 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         print(df)
     
     # Prepare data for clustering
-    X = df[['veg_mean', 'veg_std', 'circularity', 'eccentricity', 'solidity']].values
+    X = df[['area', 'veg_mean', 'veg_std', 'circularity']].values
     
     # Adaptive clustering - try different numbers of clusters
     best_result = None
     best_area_ratio = 0
     min_clusters = 2
-    max_clusters = min(4, len(X))  # Start with 4 clusters or fewer if not enough segments
+    max_clusters = min(4, len(X)-1)  # Start with 4 clusters or fewer if not enough segments
     
-    for n_clusters in range(max_clusters, min_clusters-1, -1):
+    for n_clusters in range(min_clusters, max_clusters+1, 1):
         # Apply clustering
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
         df['cluster'] = kmeans.fit_predict(X)
         
         # Identify the dominant cluster (most total area)
@@ -598,7 +612,7 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     final_mask = remove_outliers(cleaned_mask, threshold_image, debug=save_debug_image, min_area_ratio=0.12)
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
-    if config.get('save_debug', False):
+    if not config.get('save_debug', False):
         save_debug_image(
             final_mask,
             output_dir=output_dir,

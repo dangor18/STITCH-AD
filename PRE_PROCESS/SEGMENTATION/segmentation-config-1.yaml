@@ -42,8 +42,8 @@ segmentation:
     crop_n_layers: 1
 
 # Processing control flags
-show_masks: True
-skip_enabled: True
-save_debug: True
+show_masks: False
+skip_enabled: False
+save_debug: False
 autumn_filtered: False
 seed: 42
