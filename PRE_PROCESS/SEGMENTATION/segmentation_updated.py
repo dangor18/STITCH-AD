@@ -174,7 +174,6 @@ def segment_image(image: np.ndarray, mask_generator, **kwargs) -> list:
     # Ensure correct format and size
     if image.ndim == 2:
         image = np.stack([image] * 3, axis=-1)
-    original_size = image.shape[:2]
     image = scale_for_sam(image, target_size)
     
     # Generate masks
@@ -608,11 +607,10 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     
     print("  → Removing statistical outliers...")
     outlier_start = time.time()
-    # final_mask = remove_outliers(cleaned_mask, threshold_image, debug=save_debug_image, circularity_threshold=0.85, z_score_threshold=config['segmentation']['outlier_threshold'], small_segment_threshold=config['segmentation']['min_segment_size'])
     final_mask = remove_outliers(cleaned_mask, threshold_image, debug=save_debug_image, min_area_ratio=0.12)
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
-    if not config.get('save_debug', False):
+    if config.get('save_debug', False):
         save_debug_image(
             final_mask,
             output_dir=output_dir,
