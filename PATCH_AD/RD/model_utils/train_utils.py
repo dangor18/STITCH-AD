@@ -65,7 +65,7 @@ def get_loaders_proj(params, test=False):
 
         simplex_params = SimplexNoiseParams(
             **{k: v for k, v in params.items() 
-            if k in ['p_simplex', 'simplex_scale', 'simplex_noise']}
+            if k in ['octaves', 'persistence', 'amplitude', 'frequency']}
         )
 
         train_data = train_dataset(
