@@ -8,17 +8,17 @@ dataset:
   image_reader:
     type: npy
     kwargs:
-      image_dir: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\
+      image_dir: C:\Users\danie\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\INF_DEM_172\
 
   train:
-    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\metadata\all_metadata.json
+    meta_file: C:\Users\danie\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\INF_DEM_172\metadata\all_metadata.json
     rebalance: False
     hflip: False
     vflip: False
     rotate: False
 
   test:
-    meta_file: C:\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\DRGB_INF_TEST\metadata\all_metadata.json
+    meta_file: C:\Users\danie\Development\STITCH-AD\PRE_PROCESS\DATA\PATCHES\INF_DEM_172\metadata\all_metadata.json
 
   input_size: [224,224] # [h,w]
   batch_size: 1
@@ -53,7 +53,7 @@ trainer:
 saver:
   auto_resume: False
   always_save: False
-  load_path: PATCH_AD/UniAD/UniAD/stitch-o_checkpoint/ckpt.pth.tar
+  load_path: PATCH_AD/UniAD/UniAD/stitch-o_checkpoint/ckpt_best_no1996-2849.pth.tar
   save_dir: PATCH_AD/UniAD/UniAD/stitch-o_checkpoint/
   log_dir: UniAD/log/
 

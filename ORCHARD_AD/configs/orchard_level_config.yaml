@@ -1,8 +1,10 @@
 # orchard classifier params
 contamination: 0.05                     # for isolation forest
 forest_threshold: 25                    # for isolation forest
-min_cluster_size: 5                     # for DBSCAN
-min_samples: 7                          # for DBSCAN
-epsilon: 0.45573170903500854            # for DBSCAN
-alpha: 0.7154196661308218               # for DBSCAN
-v_thresh: 1.3474146404292984            # for DBSCAN
+min_cluster_size: 6                     # for DBSCAN
+min_samples: 10                    # for DBSCAN
+epsilon: 0.6246738            # for DBSCAN
+alpha: 0.6854          # for DBSCAN
+v_thresh: 1.39235            # for DBSCAN
+noise_thresh: 0.39704
+#{'min_cluster_size': 6, 'min_samples': 10, 'epsilon': 0.6246738176103979, 'alpha': 0.6854836262069152, 'v_thresh': 1.3923659555266068, 'noise_thresh': 0.397040190004858}
