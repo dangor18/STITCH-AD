@@ -126,6 +126,7 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
         Load the best model state after training, evaluate it at the patch level and then plot per orchard histograms and precision-recall curves
     """
     class_anomaly_score_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": []})     # dict of orchard id anomaly scores for each case and normal patch. Default value supplied if key not found
+    histogram_dict = defaultdict(lambda: {"pr_case_1": [], "pr_case_2": [], "pr_case_3": [], "pr_normal": [], "file_list": []})
     plot_count = defaultdict(lambda: defaultdict(int))  # dict of orchard id and label count for plotting
     orchard_patch_results = defaultdict(lambda: {"score": [], "img": [], "label": []})
     orchard_auroc_dict = {}
@@ -137,18 +138,25 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
         for input in data_loader:
             img = input["image"].to(device)
 
-            cls_name, case_id = input["clsname"][0], input["case"][0]
+            cls_name, case_id, filename = input["clsname"][0], input["case"][0], input["filename"][0]
 
             inputs, outputs = model(img)
             anomaly_score = cal_anomaly_score(inputs, outputs, score_weight, img.shape[-1], feature_weights)
             class_anomaly_score_dict[cls_name][f"pr_{case_id}"].append(anomaly_score)
 
+            # only collect orchard specific stats for plotting
             if not "all" in cls_name:
                 if plot_count[cls_name][case_id] < n_plot_per_class:
                     plot_count[cls_name][case_id] += 1
                     orchard_patch_results[cls_name]["score"].append(anomaly_score)
                     orchard_patch_results[cls_name]["img"].append(img)
                     orchard_patch_results[cls_name]["label"].append(case_id)
+            
+            # remove duplicate selections of same file for histogram
+            orchard_id = filename.split("/")[-1].split("_")[1]
+            if not filename in histogram_dict[orchard_id]["file_list"]:
+                histogram_dict[orchard_id]["file_list"].append(filename)
+                histogram_dict[orchard_id][f"pr_{case_id}"].append(anomaly_score)
     
     print("[INFO] FINAL RESULTS:")
     for orchard_id, orchard_data in class_anomaly_score_dict.items():
@@ -159,9 +167,12 @@ def test_RD(model, data_loader, device, model_path, score_weight = 1.0, feature_
         print(f"\n++ NORMAL MEAN: {orchard_score_stats['normal'][0]} \tSTD DEV: {orchard_score_stats['normal'][1]}"+
                 f"\n++ ARTEFACT MEAN: {orchard_score_stats['artefact'][0]}\tSTD DEV: {orchard_score_stats['artefact'][1]}")
         
-        #plot_histogram(orchard_data["pr_case_1"], orchard_data["pr_case_2"], orchard_data["pr_case_3"], orchard_data["pr_normal"], orchard_id)
+        # plot histogram for each orchard
+        if not "all" in orchard_id:
+            id = orchard_id.split("_")[0]
+            plot_histogram(histogram_dict[id]["pr_case_1"], histogram_dict[id]["pr_case_2"], histogram_dict[id]["pr_normal"], id)
 
-        #fig, ax = plt.subplots()
+        
         #PrecisionRecallDisplay.from_predictions([0 for _ in range(len(orchard_data["pr_normal"]))] + [1 for _ in range(len(orchard_data["pr_case_1"]))],
         #                                        orchard_data["pr_normal"] + orchard_data["pr_case_1"], name="CASE 1 PRECISION RECALL", ax=ax)
         #plt.show()

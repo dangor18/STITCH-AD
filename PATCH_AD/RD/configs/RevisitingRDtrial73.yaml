@@ -1,0 +1,42 @@
+data_path: PRE_PROCESS/DATA/PATCHES/DEM_50_172/
+meta_path_test: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata/test_metadata.json
+meta_path_train: PRE_PROCESS/DATA/PATCHES/DEM_50_172/metadata/train-0_metadata.json
+log_path: logs/DEM_50_172_trial73.txt
+resize_x: 256
+resize_y: 256
+transforms: True
+p_crop: 0
+p_noise: 0
+channels: 2
+num_workers: 4
+
+model_path: checkpoints/DEM_50_172_trial73.pth
+architecture: "wide_resnet50_2"
+#bn_attention: CBAM
+bn_attention: False
+
+feature_weights: [0.7051936503038421, 0.5861346658976497, 1.4088898938005872]
+#feature_weights: [1, 1, 1]
+
+num_epochs: 50
+batch_size: 32
+proj_lr_factor: 0.9
+proj_patience: 5
+distill_lr_factor: 0.5
+distill_patience: 5
+beta2_proj: 0.999
+beta2_distill: 0.999
+
+proj_lr: 0.00021844386216189276
+distill_lr: 0.00991702503323434
+beta1_proj: 0.9
+beta1_distill: 0.9
+score_weight: 0.8519824001994506
+proj_loss_weight: 0.9455343442352762
+ssot_weight: 0.4643031304001722
+contrast_weight: 0.17108475229847359
+reconstruct_weight: 0.8276334778731734
+octaves: 9
+amplitude: 1.3206025739412188
+frequency: 32
+persistence: 0.999273908201038

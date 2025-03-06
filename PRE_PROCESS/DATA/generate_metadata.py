@@ -6,6 +6,9 @@ import random
 from collections import defaultdict
 import shutil
 
+# set the seed
+random.seed(42)
+
 # Define the class names and their corresponding labels
 class_labels = {
    "normal": 0,

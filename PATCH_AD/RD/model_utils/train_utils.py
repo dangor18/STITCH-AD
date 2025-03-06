@@ -55,7 +55,7 @@ def get_loaders_proj(params, test=False):
         resize_dim=(params["resize_x"], params["resize_y"]),
         in_channels=params.get("channels", 3)
     )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     # only return train loader if not in "test" mode (testing or inference)
     if not test:
         aug_params = AugmentationParams(

@@ -4,6 +4,9 @@ import json
 import os
 import random
 
+# set seed
+random.seed(42)
+
 def get_norm_metadata(metadata_path, orchard_list, N):
     """
         ARGS:   metadata_path: path to the training metadata file
@@ -39,7 +42,7 @@ def get_norm_metadata(metadata_path, orchard_list, N):
                 count += 1
     
     for orchard_id in removed_patches:
-        print(f"[INFO] REMOVED {removed_patches[orchard_id]} PATCHES FROM {orchard_id} WITHIN N PIXELS FROM ANOMALOUS PATCHES.")
+        print(f"[INFO] REMOVED {removed_patches[orchard_id]} PATCHES FROM {orchard_id} WITHIN {N} PIXELS FROM ANOMALOUS PATCHES.")
 
     return train_metadata, orchard_metas
 
