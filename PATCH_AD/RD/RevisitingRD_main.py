@@ -11,6 +11,7 @@ from model_utils.train_utils import Revisit_RDLoss, loss_function, get_loaders_p
 from model_utils.plots import plot_auroc
 
 from model.RevisitingRD import RevistingRD
+from torch.amp import autocast, GradScaler
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -26,6 +27,7 @@ def train_tuning(params, trial):
     model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
     proj_loss = Revisit_RDLoss(params.get("reconstruct_weight", 0.01), params.get("contrast_weight", 0.1), params.get("ssot_weight", 1.0))
 
+    scaler = GradScaler(device=device)
     best_auroc = 0
     best_epoch = 0
     num_epoch = params.get("num_epochs", 100)
@@ -38,22 +40,25 @@ def train_tuning(params, trial):
         for i, input in enumerate(train_loader):
             img = input['normal_image'].to(device)
             img_noise = input['abnormal_image'].to(device)
-            (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)
 
-            L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
-            L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
-            loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
-            loss.backward()
+            with autocast(device_type='cuda'):
+                (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)   # forward pass
+                # calculate proj loss and total loss
+                L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
+                L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
+                loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
+            scaler.scale(loss).backward()
 
             if (i + 1) % accumulation_steps == 0:
-                model.optimizer_proj.step()
-                model.optimizer_distill.step()
+                scaler.step(model.optimizer_proj)
+                scaler.step(model.optimizer_distill)
+                scaler.update()
                 # Clear gradients
                 model.optimizer_proj.zero_grad()
                 model.optimizer_distill.zero_grad()
         
         # only start evaluating after 5 epochs (evaluate every epoch)
-        if epoch > 5:
+        if epoch >= 5:
             total_auroc, _ = evaluate_RD(model, test_loader, device, score_weight=params.get("score_weight"), feature_weights=params.get("feature_weights", [1.0, 1.0, 1.0]))      
 
             if total_auroc > best_auroc:
@@ -78,6 +83,7 @@ def train(params, train_loader, test_loader, device):
     
     auroc_dict = {}
     num_epoch = params.get("num_epochs", 100)
+    scaler = GradScaler(device=device)
 
     print("[INFO] TRAINING MODEL...")
     for epoch in range(1,num_epoch+1):
@@ -93,16 +99,19 @@ def train(params, train_loader, test_loader, device):
             # input normal and psuedo-artefact image into model
             img = input['normal_image'].to(device)
             img_noise = input['abnormal_image'].to(device)
-            (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)   # forward pass
-            # calculate proj loss and total loss
-            L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
-            L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
-            loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
-            loss.backward()
+
+            with autocast(device_type='cuda'):
+                (feature_space_noise, feature_space, inputs, inputs_noise, outputs) = model(img, img_noise)   # forward pass
+                # calculate proj loss and total loss
+                L_proj = proj_loss(inputs_noise, feature_space_noise, feature_space)
+                L_distill = loss_function(inputs, outputs, params.get("feature_weights", [1.0, 1.0, 1.0]))
+                loss = L_distill + params.get("proj_loss_weight", 0.2) * L_proj
+            scaler.scale(loss).backward()
 
             if (i + 1) % accumulation_steps == 0:
-                model.optimizer_proj.step()
-                model.optimizer_distill.step()
+                scaler.step(model.optimizer_proj)
+                scaler.step(model.optimizer_distill)
+                scaler.update()
                 # Clear gradients
                 model.optimizer_proj.zero_grad()
                 model.optimizer_distill.zero_grad()
@@ -163,7 +172,7 @@ def objective(trial, config_path):
     params["proj_lr"] = trial.suggest_float("proj_lr", low=1e-4, high=1e-1, log=True)
     params["distill_lr"] = trial.suggest_float("distill_lr", low=1e-4, high=1e-1, log=True)
     #params["batch_size"] = trial.suggest_categorical("batch_size", [16, 32])
-    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM", "SE", "GC"])
+    #params["bn_attention"] = trial.suggest_categorical("bn_attention", [False, "CBAM"])
     params["beta1_proj"] = trial.suggest_categorical("beta1_proj", [0.5, 0.9])
     params["beta1_distill"] = trial.suggest_categorical("beta1_distill", [0.5, 0.9])
 
@@ -171,23 +180,23 @@ def objective(trial, config_path):
     params["feature_weight2"] = trial.suggest_float("feature_weight2", low=0.5, high=1.5)
     params["feature_weight3"] = trial.suggest_float("feature_weight3", low=0.5, high=1.5)
     params["feature_weights"] = [params["feature_weight1"], params["feature_weight2"], params["feature_weight3"]]
-    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=0.5)
+    params["score_weight"] = trial.suggest_float("score_weight", low=0.0, high=1.0)
     
     params["proj_loss_weight"] = trial.suggest_float("proj_loss_weight", low=0.0, high=1.0)
     params["ssot_weight"] = trial.suggest_float("ssot_weight", low=0.0, high=1.0)
     params["contrast_weight"] = trial.suggest_float("contrast_weight", low=0.0, high=1.0)
     params["reconstruct_weight"] = trial.suggest_float("reconstruct_weight", low=0.0, high=1.0)
 
-    params["simplex_octaves"] = trial.suggest_int("simplex_octaves", low=2, high=10)
-    params["simplex_amp"] = trial.suggest_float("simplex_amp", low=0.1, high=1.5)
-    params["simplex_freq"] = trial.suggest_categorical("simplex_freq", [8, 16, 32, 64])
-    params["simplex_presistence"] = trial.suggest_float("simplex_persistence", low=0.1, high=1.5)
+    params["octaves"] = trial.suggest_int("octaves", low=3, high=12)
+    params["amplitude"] = trial.suggest_float("amplitude", low=0.5, high=1.5)
+    params["frequency"] = trial.suggest_categorical("frequency", [4, 8, 16, 32, 64])
+    params["persistence"] = trial.suggest_float("persistence", low=0.5, high=1.0)
     return train_tuning(params, trial)
 
 if __name__ == '__main__':
     cwd = os.path.dirname(os.path.realpath(__file__))       # directory of the script
     parser = ArgumentParser(description="")
-    parser.add_argument("--config", "-c", default=os.path.join(cwd, "configs", "contrast_config.yaml"), required=False)
+    parser.add_argument("--config", "-c", default=os.path.join(cwd, "configs", "RevisitingRD.yaml"), required=False)
     parser.add_argument("num_trials", type=int, nargs='?', help="Number of trials for hyperparameter tuning")
     parser.add_argument("--tune", action="store_true", help="Run hyperparameter tuning with Optuna")
     parser.add_argument("--test", action="store_true", help="Load the model in config and test it")
@@ -211,7 +220,7 @@ if __name__ == '__main__':
         print("[INFO] DEVICE:", device) 
         # create data loaders
         print("[INFO] LOADING DATA...")
-        train_loader, test_loader = get_loaders_proj(params, test=True)
+        test_loader = get_loaders_proj(params, test=True)
             
         # test
         model = RevistingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)

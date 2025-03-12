@@ -9,6 +9,7 @@ from easydict import EasyDict
 import yaml
 from mmcv import Config
 import cv2
+import torch.nn.functional as F
 
 sys.path.insert(0, "PATCH_AD/RD/")
 sys.path.insert(0, "PATCH_AD/UniAD/")
@@ -26,6 +27,10 @@ from PATCH_AD.UniAD.run_inference import encode_pred as encode_pred_UniAD
 # SCADN model imports
 from PATCH_AD.SCADN.src import custom_dataset as SCADN_dataset # TODO
 from PATCH_AD.SCADN.src.custom_experiments import ExpStitchO
+
+import numpy as np
+
+from scipy.ndimage import laplace
 
 def load_config_UniAD(config_path):
     """
@@ -69,19 +74,18 @@ def load_model(model_type, params, device):
     """
     if model_type == "RD":
         model = RD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
-        model.load_model(params["checkpoint"])
+        model.load_model(params["model_checkpoint"])
         model.eval()
         return model
     elif model_type == "RevisitingRD":
         model = RevisitingRD(params["architecture"], params["bn_attention"], params.get("channels", 3), device, params)
-        model.load_model(params["checkpoint"])
+        model.load_model(params["model_checkpoint"])
         model.eval()
         return model
     elif model_type == "UniAD":
         model = UniAD_model(params.net)
         model.cuda()
-        checkpoint_path = os.path.join(params.saver.save_dir, "ckpt_best.pth.tar")
-        checkpoint = torch.load(checkpoint_path, weights_only=False)
+        checkpoint = torch.load(params.saver.load_path, weights_only=False)
         model.load_state_dict(checkpoint['state_dict'])
         thresholds = checkpoint.get('thresholds', {})   # TODO
         model.eval()
@@ -128,7 +132,7 @@ def get_scores_UniAD(model, data_loader, params, device):
 
             outputs = model(input)    # get the input and output from the model
             preds = outputs["pred"].cpu().numpy()
-            score = encode_pred_UniAD(preds)
+            score = float(encode_pred_UniAD(preds)[0])
             
             score_dict[cls_name].append([x, y, score, lbl])
 
@@ -173,11 +177,69 @@ def get_scores_RD(model, data_loader, params, device):
             inputs, outputs = model(patch)    # get the input and output from the model
 
             score = anomaly_score_RD(inputs, outputs, score_weight=params["score_weight"], feature_weights=params["feature_weights"])    # get the anomaly score for the patch
-            # TODO possibly need to wrap this in a bettter function for all the models to work
-            
-            score_dict[cls_name].append([x, y, score, lbl])
+            DEM = patch[0, 0].cpu().numpy()
+            # get std
+            std_dem = np.std(DEM).item()  # std of DEM channel
+            # get mean
+            mean = np.mean(DEM).item() # mean of DEM channel
+            complexity = np.sum(np.abs(laplace(DEM))).item()
+
+            score_dict[cls_name].append([x, y, score, mean, std_dem, complexity, lbl])
 
     return score_dict
+
+def remap_coordinates(score_dict, sort_by_new=False):
+    """
+    Remaps the coordinates in score_dict to start from (0,0) and increment by 1.
+    This handles "jumps" in the original coordinate system caused by masked regions.
+    
+    Args:
+        score_dict: Dictionary mapping orchard names to lists of [x, y, score, mean, std_dem, complexity, lbl]
+        sort_by_new: If True, sorts the entries by new_y, then new_x (optional)
+    
+    Returns:
+        Updated score_dict with remapped coordinates
+    """
+    remapped_dict = defaultdict(list)
+    
+    for cls_name, entries in score_dict.items():
+        # Create a mapping from original coordinates to new indices
+        mapping = {}
+        
+        # Extract unique (x, y) pairs
+        unique_xy = set((entry[0], entry[1]) for entry in entries)
+        
+        # Sort by y, then by x
+        sorted_xy = sorted(unique_xy, key=lambda xy: (xy[1], xy[0]))
+        
+        current_y = None
+        new_y = -1
+        new_x = 0
+        
+        for x, y in sorted_xy:
+            if y != current_y:
+                # New row
+                current_y = y
+                new_y += 1
+                new_x = 0
+            
+            mapping[(x, y)] = (new_x, new_y)
+            new_x += 1
+        
+        # Apply the mapping to all entries
+        remapped_entries = []
+        for entry in entries:
+            x, y, score, mean, std_dem, complexity, lbl = entry
+            new_x, new_y = mapping[(x, y)]
+            remapped_entries.append([new_x, new_y, score, mean, std_dem, complexity, lbl])
+        
+        # Sort by new coordinates if requested
+        if sort_by_new:
+            remapped_entries.sort(key=lambda e: (e[1], e[0]))
+        
+        remapped_dict[cls_name] = remapped_entries
+    
+    return remapped_dict
 
 def get_loaders(model_type, params):
     """

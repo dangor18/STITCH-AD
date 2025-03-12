@@ -41,8 +41,9 @@ def get_scores(model_type, params, device='cuda'):
             device: device to run the model on
     """
     # check if json file exists
-    if os.path.exists(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json"):
-        with open(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json", "r") as f:
+    json_checkpoint = params["json_checkpoint"]
+    if os.path.exists(f"ORCHARD_AD/checkpoints/{json_checkpoint}"):
+        with open(f"ORCHARD_AD/checkpoints/{json_checkpoint}", "r") as f:
             return json.load(f)
     
     start_time = time.time()
@@ -64,7 +65,7 @@ def get_scores(model_type, params, device='cuda'):
     run_time = end_time - start_time
     print("TIME (s):", run_time)
     # write dict to file (only used for the demo)
-    with open(f"ORCHARD_AD/checkpoints/{model_type}_score_dict.json", "w") as f:
+    with open(f"ORCHARD_AD/checkpoints/{json_checkpoint}", "w") as f:
         json.dump(score_dict, f)
 
     return score_dict
@@ -80,7 +81,7 @@ def infer_iso_forest(params, score_dict):
     pr_dict = {}
     # initialize confusion matrices
     normal_cm = np.zeros((2, 2))
-    anomalous_cm = np.zeros((2, 2))
+    anomalous_cm = defaultdict(lambda: np.zeros((2, 2)))
     
     # initialize isolation forest
     clf = IsolationForest(contamination=params["contamination"], random_state=42)
@@ -88,12 +89,14 @@ def infer_iso_forest(params, score_dict):
     #clf.fit(np.concatenate([scores for scores in score_dict.values()]).reshape(-1, 1))    # fit the isolation forest
     for orchard_id, data in score_dict.items():
         scores = np.array([item[2] for item in data])           # get each patches score
+        mean = np.array([item[3] for item in data])
+        std = np.array([item[4] for item in data])
+        complexity = np.array([item[5] for item in data])
         locations = np.array([item[0:2] for item in data])      # get each patches location
-        gt_labels = np.array([item[3] for item in data])        # get each patches label (used for evaluation only)
-        #print(orchard_id, np.unique(gt_labels, return_counts=True))
+        gt_labels = np.array([item[-1] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
         
         # combine scores and locations
-        features = np.column_stack((scores, locations))
+        features = np.column_stack((scores, std, complexity))
         scaler = StandardScaler()
         features_normalized = scaler.fit_transform(features)
         clf.fit(features_normalized)
@@ -108,7 +111,7 @@ def infer_iso_forest(params, score_dict):
         if gt_dict[orchard_id] == 1:  # normal orchard
             normal_cm += np.array([[TN, FP], [FN, TP]])
         else:  # anomalous orchard
-            anomalous_cm += np.array([[TN, FP], [FN, TP]])
+            anomalous_cm[orchard_id] += np.array([[TN, FP], [FN, TP]])
 
         # if the number of anomalies is greater than the threshold, classify as anomalous
         if np.unique(predictions, return_counts=True)[1][0] > params["forest_threshold"]:
@@ -128,59 +131,71 @@ def infer_dbscan(params, score_dict):
     pr_dict = {}
     # initialize confusion matrices
     normal_cm = np.zeros((2, 2))
-    anomalous_cm = np.zeros((2, 2))
+    anomalous_cm = defaultdict(lambda: np.zeros((2, 2)))
+
+    #score_dict = remap_coordinates(score_dict, sort_by_new=True)
 
     hdbscan = HDBSCAN(min_cluster_size=params["min_cluster_size"], min_samples=params["min_samples"], cluster_selection_epsilon=params["epsilon"], alpha=params["alpha"])
     for orchard_id, data in score_dict.items():
         scores = np.array([item[2] for item in data])           # get each patches score
+        mean = np.array([item[3] for item in data])
+        std = np.array([item[4] for item in data])
+        complexity = np.array([item[5] for item in data])
         locations = np.array([item[0:2] for item in data])      # get each patches location
-        gt_labels = np.array([item[3] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
-        #print(orchard_id, np.unique(gt_labels, return_counts=True))
-
-        features = np.column_stack((locations, scores))
+        gt_labels = np.array([item[-1] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
+        features = np.column_stack((locations, scores, std))
         scaler = StandardScaler()
         features_normalized = scaler.fit_transform(features)
         cluster_labels = hdbscan.fit_predict(features_normalized)     # fit the model
        
-        #print(orchard_id + "\n", np.unique(hdbscan.labels_, return_counts=True))
-        # find the largest cluster (ignore noise / -1)
+        # find the largest cluster (ignore noise / -1) and label it as normal
         unique_labels, counts = np.unique(cluster_labels[cluster_labels != -1], return_counts=True)
         if len(unique_labels) == 0:
             pr_dict[orchard_id] = 1
             continue
         else:
             normal_label = unique_labels[np.argmax(counts)]
-
-            # calculate the mean score (z component) for each cluster and also its size
-            cluster_stats = []
-            normal_mean = np.mean(features_normalized[cluster_labels == normal_label, 2])
-            for label in unique_labels:
-                if label != -1:
-                    cluster_data = features_normalized[cluster_labels == label]
-                    cluster_stats.append([label, np.mean(cluster_data[:, 2]), len(cluster_data)])
-            #print(orchard_id, cluster_stats)
             
-            # identify whether anomalous clusters exist (those with enough elements and large mean score)
             anom_clusters = []
             norm_clusters = [normal_label, -1]
             pr_dict[orchard_id] = 1
-            for label, mean_z, size in cluster_stats:
-                if label != normal_label:
-                    if (mean_z > normal_mean + params["v_thresh"] and
-                        size >= params["min_cluster_size"]):
-                        pr_dict[orchard_id] = -1
-                        anom_clusters.append(label)
-                    else:
-                        norm_clusters.append(label)
-        #print(orchard_id, anom_clusters, norm_clusters)
+            noise_indices = cluster_labels == -1
+            non_noise_features = features_normalized[~noise_indices]
+            non_noise_labels = cluster_labels[~noise_indices]
 
-        # relabel noise points to the closest non-noise point label
-        noise_feature_indices = cluster_labels == -1
-        non_noise_labels = cluster_labels[~noise_feature_indices]
-        for i in range(len(cluster_labels)):
-            if cluster_labels[i] == -1:
-                distances = np.linalg.norm(features_normalized[i] - features_normalized[~noise_feature_indices], axis=1) # calculate distance to all non-noise points
-                cluster_labels[i] = non_noise_labels[np.argmin(distances)]    # assign the label of the closest non-noise point
+            # normal mean used for thresholding later
+            normal_mean = np.mean(features_normalized[cluster_labels == normal_label, 2])
+
+            # first process noise points
+            for i in range(len(cluster_labels)):
+                # get nearest non noise cluster to this point
+                distances = np.linalg.norm(features_normalized[i] - non_noise_features, axis=1)
+                nearest_idx = np.argmin(distances)
+                nearest_cluster = non_noise_labels[nearest_idx]
+                # get mean and std of this cluster
+                mean = np.mean(features_normalized[cluster_labels == nearest_cluster, 2])
+                std = np.std(features_normalized[cluster_labels == nearest_cluster, 2])
+                if cluster_labels[i] == -1:
+                    # assign to a new cluster if score exceeds threshold
+                    if features_normalized[i, 2] > mean + params["noise_thresh"] * std:
+                        cluster_labels[i] = -2  # Special anomaly label
+                    else:
+                        # else assign to the nearest non noise cluster
+                        cluster_labels[i] = nearest_cluster
+
+            # classification decision, where you loop through each cluster and compare it's mean score to the largest cluster, if it's larger than threshold, classify orchard as anomalous
+            for label in np.unique(cluster_labels):
+                if label != normal_label and label != -1:
+                    cluster_data = features_normalized[cluster_labels == label]
+                    mean_score = np.mean(cluster_data[:, 2])
+                    size = len(cluster_data)
+                    if (mean_score > normal_mean + params["v_thresh"] and 
+                        size >= params["min_cluster_size"]):
+                        anom_clusters.append(label)
+                        pr_dict[orchard_id] = -1
+                    else:
+                        #print(orchard_id, label, mean_score, size)
+                        norm_clusters.append(label)
 
         predictions = np.zeros(cluster_labels.shape)
         predictions[np.isin(cluster_labels, anom_clusters)] = -1
@@ -194,23 +209,51 @@ def infer_dbscan(params, score_dict):
         if gt_dict[orchard_id] == 1:  # normal orchard
             normal_cm += np.array([[TN, FP], [FN, TP]])
         else:  # anomalous orchard
-            anomalous_cm += np.array([[TN, FP], [FN, TP]])
+            anomalous_cm[orchard_id] += np.array([[TN, FP], [FN, TP]])
         
         # plot the clusters
-        fig = plt.figure(figsize=(12, 10))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        scatter = ax.scatter(features_normalized[:, 0], features_normalized[:, 1], features_normalized[:, 2], c=cluster_labels, cmap='rainbow')
-        fig.colorbar(scatter)
-        
-        ax.set_title(f'3D Adaptive HDBSCAN Clustering for Orchard {orchard_id}', size=20)
-        ax.set_xlabel('X Location', size=15)
-        ax.set_ylabel('Y Location', size=15)
-        ax.set_zlabel('Score', size=15)
-        plt.show()
+        plot_orchard_clustering(features_normalized, cluster_labels, orchard_id, gt_labels)
         
     return pr_dict, normal_cm, anomalous_cm
 
+def plot_orchard_clustering(features_normalized, cluster_labels, orchard_id, gt_labels):
+    fig = plt.figure(figsize=(20, 10))
+    
+    # Clustering results subplot
+    ax1 = fig.add_subplot(121, projection='3d')
+    scatter1 = ax1.scatter(features_normalized[:, 0], 
+                          features_normalized[:, 1], 
+                          features_normalized[:, 2], 
+                          c=cluster_labels, 
+                          cmap='brg')
+    fig.colorbar(scatter1, ax=ax1)
+    ax1.set_title(f'Clustering Results for Orchard {orchard_id}', size=20)
+    ax1.set_xlabel('X Location', size=15)
+    ax1.set_ylabel('Y Location', size=15)
+    ax1.set_zlabel('Score', size=15)
+    ax1.set_zlim(-3, 6)
+    
+    # ground truth subplot
+    ax2 = fig.add_subplot(122, projection='3d')
+    scatter2 = ax2.scatter(features_normalized[:, 0], 
+                          features_normalized[:, 1], 
+                          features_normalized[:, 2], 
+                          c=gt_labels, 
+                          cmap='RdYlGn',  # Red for anomalous (-1), Green for normal (1)
+                          vmin=-1, 
+                          vmax=1)
+    fig.colorbar(scatter2, ax=ax2)
+    ax2.set_title(f'Ground Truth for Orchard {orchard_id}', size=20)
+    ax2.set_xlabel('X Location', size=15)
+    ax2.set_ylabel('Y Location', size=15)
+    ax2.set_zlabel('Score', size=15)
+    ax2.set_zlim(-3, 6)
+    
+    plt.tight_layout()
+    #os.makedirs("ORCHARD_AD/plots", exist_ok=True)
+    #plt.savefig(f"ORCHARD_AD/plots/{orchard_id}_clustering_comparison.png")
+    plt.show()
+    plt.close()
 
 def tune_dbscan(params, score_dict, trial):
     '''
@@ -221,56 +264,73 @@ def tune_dbscan(params, score_dict, trial):
     '''
     pr_dict = {}
     # initialize confusion matrices
-    total_cm = np.zeros((2, 2))
+    normal_cm = np.zeros((2, 2))
+    anomalous_cm = defaultdict(lambda: np.zeros((2, 2)))
+
+    #score_dict = remap_coordinates(score_dict, sort_by_new=True)
 
     hdbscan = HDBSCAN(min_cluster_size=params["min_cluster_size"], min_samples=params["min_samples"], cluster_selection_epsilon=params["epsilon"], alpha=params["alpha"])
     for orchard_id, data in score_dict.items():
         scores = np.array([item[2] for item in data])           # get each patches score
+        mean = np.array([item[3] for item in data])
+        std = np.array([item[4] for item in data])
+        complexity = np.array([item[5] for item in data])
         locations = np.array([item[0:2] for item in data])      # get each patches location
-        gt_labels = np.array([item[3] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
-        #print(orchard_id, np.unique(gt_labels, return_counts=True))
-
-        features = np.column_stack((locations, scores))
+        gt_labels = np.array([item[-1] for item in data])        # get each patches ground truth label (Anom or Normal) (used for evaluation only)
+        features = np.column_stack((locations, scores, std))
         scaler = StandardScaler()
         features_normalized = scaler.fit_transform(features)
         cluster_labels = hdbscan.fit_predict(features_normalized)     # fit the model
        
-        # find the largest cluster (ignore noise / -1)
+        # find the largest cluster (ignore noise / -1) and label it as normal
         unique_labels, counts = np.unique(cluster_labels[cluster_labels != -1], return_counts=True)
         if len(unique_labels) == 0:
             pr_dict[orchard_id] = 1
             continue
         else:
             normal_label = unique_labels[np.argmax(counts)]
-
-            # calculate the mean score (z component) for each cluster and also its size
-            cluster_stats = []
-            normal_mean = np.mean(features_normalized[cluster_labels == normal_label, 2])
-            for label in unique_labels:
-                if label != -1:
-                    cluster_data = features_normalized[cluster_labels == label]
-                    cluster_stats.append([label, np.mean(cluster_data[:, 2]), len(cluster_data)])
             
-            # identify whether anomalous clusters exist (those with enough elements and large mean score)
             anom_clusters = []
             norm_clusters = [normal_label, -1]
             pr_dict[orchard_id] = 1
-            for label, mean_z, size in cluster_stats:
-                if label != normal_label:
-                    if (mean_z > normal_mean + params["v_thresh"] and
-                        size >= params["min_cluster_size"]):
-                        pr_dict[orchard_id] = -1
-                        anom_clusters.append(label)
-                    else:
-                        norm_clusters.append(label)
-        # relabel noise points to the closest non-noise point label
-        noise_feature_indices = cluster_labels == -1
-        non_noise_labels = cluster_labels[~noise_feature_indices]
-        for i in range(len(cluster_labels)):
-            if cluster_labels[i] == -1:
-                distances = np.linalg.norm(features_normalized[i] - features_normalized[~noise_feature_indices], axis=1) # calculate distance to all non-noise points
-                cluster_labels[i] = non_noise_labels[np.argmin(distances)]    # assign the label of the closest non-noise point
+            noise_indices = cluster_labels == -1
+            non_noise_features = features_normalized[~noise_indices]
+            non_noise_labels = cluster_labels[~noise_indices]
 
+            # normal mean used for thresholding later
+            normal_mean = np.mean(features_normalized[cluster_labels == normal_label, 2])
+
+            # first process noise points
+            for i in range(len(cluster_labels)):
+                # get nearest non noise cluster to this point
+                distances = np.linalg.norm(features_normalized[i] - non_noise_features, axis=1)
+                nearest_idx = np.argmin(distances)
+                nearest_cluster = non_noise_labels[nearest_idx]
+                # get mean and std of this cluster
+                mean = np.mean(features_normalized[cluster_labels == nearest_cluster, 2])
+                std = np.std(features_normalized[cluster_labels == nearest_cluster, 2])
+                if cluster_labels[i] == -1:
+                    # assign to a new cluster if score exceeds threshold
+                    if features_normalized[i, 2] > mean + params["noise_thresh"] * std:
+                        cluster_labels[i] = -2  # Special anomaly label
+                    else:
+                        # else assign to the nearest non noise cluster
+                        cluster_labels[i] = nearest_cluster
+
+            # classification decision, where you loop through each cluster and compare it's mean score to the largest cluster, if it's larger than threshold, classify orchard as anomalous
+            for label in np.unique(cluster_labels):
+                if label != normal_label and label != -1:
+                    cluster_data = features_normalized[cluster_labels == label]
+                    mean_score = np.mean(cluster_data[:, 2])
+                    size = len(cluster_data)
+                    if (mean_score > normal_mean + params["v_thresh"] and 
+                        size >= params["min_cluster_size"]):
+                        anom_clusters.append(label)
+                        pr_dict[orchard_id] = -1
+                    else:
+                        #print(orchard_id, label, mean_score, size)
+                        norm_clusters.append(label)
+    
         predictions = np.zeros(cluster_labels.shape)
         predictions[np.isin(cluster_labels, anom_clusters)] = -1
         predictions[np.isin(cluster_labels, norm_clusters)] = 1
@@ -280,30 +340,43 @@ def tune_dbscan(params, score_dict, trial):
         TP = np.sum((predictions == -1) & (gt_labels == -1))    # true positives
         TN = np.sum((predictions == 1) & (gt_labels == 1))      # true negatives
 
-        total_cm += np.array([[TN, FP], [FN, TP]])
+        if gt_dict[orchard_id] == -1:
+            anomalous_cm[orchard_id] += np.array([[TN, FP], [FN, TP]])
     
-    return get_F1(total_cm)
+    orchard_acc = np.sum([1 for k, v in pr_dict.items() if v == gt_dict[k]]) / len(pr_dict)
+    
+    if orchard_acc != 1:
+        return -1
 
-def objective(trial, params, model_type):
-    score_dict = get_scores(model_type, params)
+    f1_dict = get_F1(anomalous_cm)
+    return np.mean(list(f1_dict.values()))
+
+def objective(trial, model_params, orchard_params, model_type):
+    score_dict = get_scores(model_type, model_params)
     # parameters to tune HDBSCAN
-    params["min_cluster_size"] = trial.suggest_int("min_cluster_size", low=3, high=10)
-    params["min_samples"] = trial.suggest_int("min_samples", low=3, high=10)
-    params["epsilon"] = trial.suggest_float("epsilon", low=0.05, high=1.0)
-    params["alpha"] = trial.suggest_float("alpha", low=0.1, high=1.5)
-    params["v_thresh"] = trial.suggest_float("v_thresh", low=1.0, high=2.5)
+    orchard_params["min_cluster_size"] = trial.suggest_int("min_cluster_size", low=3, high=10)
+    orchard_params["min_samples"] = trial.suggest_int("min_samples", low=3, high=10)
+    orchard_params["epsilon"] = trial.suggest_float("epsilon", low=0.05, high=1.0)
+    orchard_params["alpha"] = trial.suggest_float("alpha", low=0.1, high=1.5)
+    orchard_params["v_thresh"] = trial.suggest_float("v_thresh", low=1.0, high=2.5)
+    orchard_params["noise_thresh"] = trial.suggest_float("noise_thresh", low=0.1, high=1.5)
 
-    return tune_dbscan(params, score_dict, trial)
+    return tune_dbscan(orchard_params, score_dict, trial)
 
-def get_F1(cm):
+def get_F1(cm_dict):
     """
         Calculate the F1 score from a confusion matrix
     """
-    tn, fp, fn, tp = cm.ravel()
-    
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = 2 * (precision * recall) / (precision + recall)
+    f1 = defaultdict(float)
+    for orchard_id, cm in cm_dict.items():
+        tn, fp, fn, tp = cm.ravel()
+        
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        if precision + recall == 0:
+            f1[orchard_id] = 0
+        f1[orchard_id] = 2 * (precision * recall) / (precision + recall)
+
     return f1
 
 def print_results(pr_dict, normal_cm, anomalous_cm):
@@ -318,7 +391,11 @@ def print_results(pr_dict, normal_cm, anomalous_cm):
         print(f"\nORCHARD ID: {orchard_id}    PREDICTION: {pred_list[pr]}     GROUND TRUTH: {pred_list[gt_dict[orchard_id]]}")
     
     print("ORCHARD CLASSIFICATION ACCURACY:", np.sum([1 for k, v in pr_dict.items() if v == gt_dict[k]]) / len(pr_dict))
-    disp_anom = ConfusionMatrixDisplay(anomalous_cm, display_labels=["Normal", "Anomalous"])
+    
+    anom_cm = np.sum(list(anomalous_cm.values()), axis=0)
+    disp_anom = ConfusionMatrixDisplay(anom_cm, display_labels=["Normal", "Anomalous"])
+    #print(anomalous_cm)
+    #print(normal_cm)
     disp_norm = ConfusionMatrixDisplay(normal_cm, display_labels=["Normal", "Anomalous"])
     disp_anom.plot(values_format='', cmap='Blues')
     plt.title("Anomalous Orchards Confusion Matrix")
@@ -326,15 +403,18 @@ def print_results(pr_dict, normal_cm, anomalous_cm):
     disp_norm.plot(values_format='', cmap='Blues')
     plt.title("Normal Orchards Confusion Matrix")
     plt.show()
-    print("ANOMALOUS ORCHARD F1 SCORE:", get_F1(anomalous_cm))
-    #print("NORMAL ORCHARD F1 SCORE:", get_F1(normal_cm))
+    f1_dict = get_F1(anomalous_cm)
+    for orchard_id, f1 in f1_dict.items():
+        print(f"ORCHARD ID: {orchard_id}    F1 SCORE: {f1}")
+    
+    print("AVERAGE ANOMALOUS ORCHARD F1 SCORE:", np.mean(list(f1_dict.values())))
 
 if __name__ == "__main__":
     os.makedirs("ORCHARD_AD/checkpoints", exist_ok=True)
     config_dir = "ORCHARD_AD/configs/"
     arg_parser = ArgumentParser()
     arg_parser.add_argument("--orchard_config", "-oc", type=str, default="orchard_level_config.yaml")
-    arg_parser.add_argument("--model_type", "-m", type=str, default="RevisitingRD", help="model type to use (RD, RevisitingRD, UniAD, SCADN)")
+    arg_parser.add_argument("--model_type", "-mt", type=str, default="RevisitingRD", help="model type to use (RD, RevisitingRD, UniAD, SCADN)")
     arg_parser.add_argument("--model_config", "-mc", type=str, default="RD_config.yaml")
     arg_parser.add_argument("--test", action="store_true", help="load stored data from DL model instead of infering on each patch. Just here for making the demo faster")
     arg_parser.add_argument("--tune", action="store_true", help="for tuning HDBSCAN params with Optuna")
@@ -354,9 +434,9 @@ if __name__ == "__main__":
 
     # tune the orchard level models (assumes the json file exists)
     if args.tune:
-        objective_w_params = lambda trial: objective(trial, orchard_params, model_type)
+        objective_w_params = lambda trial: objective(trial, model_params, orchard_params, model_type)
         study = optuna.create_study(direction="maximize")
-        study.optimize(objective_w_params, n_trials=1500)
+        study.optimize(objective_w_params, n_trials=500)
         print(study.best_params)
         print(study.best_value)
         exit()

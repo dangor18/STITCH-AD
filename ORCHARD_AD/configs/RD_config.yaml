@@ -5,9 +5,11 @@ resize_x: 256
 resize_y: 256
 channels: 2
 
-checkpoint: checkpoints/DEM_50_172_no1676-1996-2057-2849.pth
+model_checkpoint: checkpoints/DEM_50_172_trial132.pth   # use for first time running inference
+json_checkpoint: RD_DEM_50_172_trial132-0.json               # use for subsequent runs (results saved to json for faster tuning and experimenting)
 # relevent model parameters for inference
 architecture: "wide_resnet50_2"
 bn_attention: False
-feature_weights: [0.5013935521474101, 0.9204031020649206, 1.1948189728467433]
-score_weight: 0.483015283613563
+feature_weights: [0.6338435151392628, 0.5214932144824888, 1.4296368536660933]
+#feature_weights: [1, 1, 1]
+score_weight: 0.9849566843283396

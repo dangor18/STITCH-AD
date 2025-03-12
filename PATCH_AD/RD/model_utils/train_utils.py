@@ -55,7 +55,7 @@ def get_loaders_proj(params, test=False):
         resize_dim=(params["resize_x"], params["resize_y"]),
         in_channels=params.get("channels", 3)
     )
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=test)
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
     # only return train loader if not in "test" mode (testing or inference)
     if not test:
         aug_params = AugmentationParams(
@@ -65,7 +65,7 @@ def get_loaders_proj(params, test=False):
 
         simplex_params = SimplexNoiseParams(
             **{k: v for k, v in params.items() 
-            if k in ['p_simplex', 'simplex_scale', 'simplex_noise']}
+            if k in ['octaves', 'persistence', 'amplitude', 'frequency']}
         )
 
         train_data = train_dataset(

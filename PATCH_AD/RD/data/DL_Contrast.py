@@ -20,7 +20,7 @@ class AugmentationParams:
     p_rotate: float = 0.5
     p_crop: float = 0.5
     p_blur: float = 0.1
-    p_noise: float = 0.1
+    p_noise: float = 0.05
 
 @dataclass
 class SimplexNoiseParams:
@@ -184,14 +184,15 @@ class train_dataset(Dataset):
         if random.random() < self.aug_params.p_flip:
             normal_img = F.vflip(normal_img)
             noise_img = F.vflip(noise_img)
-        if random.random() < self.aug_params.p_rotate:
-            angle = random.randint(0, 360)
-            normal_img = F.rotate(normal_img, angle)
-            noise_img = F.rotate(noise_img, angle)
         if random.random() < self.aug_params.p_crop:
             scale = random.uniform(1.0, 1.3)
             normal_img = F.affine(normal_img, angle=0, translate=[0, 0], scale=scale, shear=0)
             noise_img = F.affine(noise_img, angle=0, translate=[0, 0], scale=scale, shear=0)
+        if random.random() < self.aug_params.p_rotate:
+            angles = [45, 90, 135, 180, 225, 270, 315]
+            angle = random.choice(angles)
+            normal_img = F.rotate(normal_img, angle)
+            noise_img = F.rotate(noise_img, angle)
         
         return normal_img, noise_img
     
@@ -283,7 +284,7 @@ class train_dataset(Dataset):
 
         #print(normal_image)
         #print(img_noise)
-        #plot_channels(normal_image, "Normal Image Channels")
+        #plot_channels(normal_image, "Normal Image Channels {orchard_id}".format(orchard_id=input["clsname"]))
         #plot_channels(img_noise, "Psuedo Stitching Artefact Channels")
 
         return input
