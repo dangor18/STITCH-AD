@@ -39,7 +39,7 @@ def create_threshold_mask(image: np.ndarray, output_dir: str) -> np.ndarray:
     
     # Enhance using CLAHE
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-    shadow = clahe.apply(cv2.normalize(shadow * 85, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+    shadow = clahe.apply(cv2.normalize(shadow, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
     seasonal = clahe.apply(cv2.normalize(seasonal, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
     
     # Combine channels
@@ -52,26 +52,19 @@ def create_threshold_mask(image: np.ndarray, output_dir: str) -> np.ndarray:
         cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)**2
     )
     sobel = clahe.apply(cv2.normalize(sobel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
-    
-    # Enhanced edge targeting
-    enhanced = sobel.astype(np.float32)
-    diff = enhanced - 10  # Target edge strength
-    mask = np.abs(diff) < 10  # Delta range
-    enhanced[mask] = 10 + (diff[mask] * 1.0)  # Apply strength multiplier
-    enhanced = np.clip(enhanced, 0, 255).astype(np.uint8)
-    
-    
+        
     # Watershed segmentation
     markers = cv2.connectedComponents(
-        cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        cv2.threshold(sobel, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     )[1] + 1
-    markers[enhanced < 30] = 0
+    markers[sobel < 30] = 0
     
     watershed_mask = (cv2.watershed(
-        cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR), 
+        cv2.cvtColor(sobel, cv2.COLOR_GRAY2BGR), 
         markers
     ) > 1).astype(np.uint8) * 255
-    
+        
+
     return watershed_mask
 
 def remove_small_segments(masks: list, image_shape: tuple, image: np.ndarray, 
@@ -224,130 +217,10 @@ def extract_uog_id(filepath):
     return None
 
 def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray, 
-                   small_segment_threshold=0.004, circularity_threshold=0.85, 
-                   z_score_threshold=-1.5, debug=True) -> np.ndarray:
-    """Remove segments with anomalous characteristics based on threshold image.
-    
-    Args:
-        mask: Binary mask containing segments to analyze
-        threshold_img: Thresholded vegetation image (binary or grayscale)
-        small_segment_threshold: Minimum size ratio for segments
-        circularity_threshold: Maximum circularity value (1.0 = perfect circle)
-        z_score_threshold: Threshold for vegetation density z-score
-        debug: Whether to print detailed debug information
-        
-    Returns:
-        Cleaned binary mask with outlier segments removed
-    """
-    from skimage.measure import regionprops
-    from scipy import stats, ndimage
-    
-    labeled, num_features = ndimage.label(mask)
-    if num_features == 0:
-        if debug:
-            print("No segments found in mask")
-        return mask
-    
-    if debug:
-        print(f"Processing {num_features} segments")
-        print(f"Threshold image shape: {threshold_img.shape}, min: {np.min(threshold_img)}, max: {np.max(threshold_img)}")
-    
-    total_pixels = mask.shape[0] * mask.shape[1]
-    segments_to_remove = []
-    small_segments = []
-    circular_segments = []
-    
-    # Calculate absolute minimum size in pixels
-    min_segment_size = small_segment_threshold * total_pixels
-    
-    if debug:
-        print(f"Minimum segment size: {min_segment_size:.1f} pixels ({small_segment_threshold:.6f} ratio)")
-    
-    # Collect statistics for all segments
-    segment_stats = []
-    segment_weights = []
-    
-    for i in range(1, num_features + 1):
-        segment = labeled == i
-        segment_pixels = np.sum(segment)
-        
-        # Filter tiny segments
-        if segment_pixels < min_segment_size:
-            if debug and len(small_segments) < 5:  # Only print first 5
-                print(f"  Removing small segment {i}: {segment_pixels} pixels < {min_segment_size:.1f}")
-            small_segments.append(i)
-            segments_to_remove.append(i)
-            continue
-        
-        # Shape analysis - circularity
-        props = regionprops(segment.astype(np.uint8))[0]
-        circularity = 4 * np.pi * props.area / (props.perimeter**2) if props.perimeter > 0 else 0
-        
-        # Filter highly circular segments (likely water bodies)
-        if circularity > circularity_threshold:
-            if debug:
-                print(f"Segment {i}: High circularity {circularity:.4f} > {circularity_threshold}")
-            circular_segments.append(i)
-            segments_to_remove.append(i)
-            continue
-        
-        # Vegetation analysis from threshold image
-        veg_values = threshold_img[segment]
-        veg_mean = np.mean(veg_values)
-        veg_std = np.std(veg_values)
-        
-        # Store statistics and use segment size as weight
-        segment_stats.append((i, veg_mean, veg_std, circularity))
-        segment_weights.append(segment_pixels)
-    
-    low_veg_segments = []
-    if segment_stats and len(segment_stats) > 1:
-        # Extract data for weighted statistical analysis
-        segment_ids = np.array([s[0] for s in segment_stats])
-        veg_means = np.array([s[1] for s in segment_stats])
-        veg_stds = np.array([s[2] for s in segment_stats])
-        weights = np.array(segment_weights)
-        
-        # Calculate weighted mean and std
-        weighted_mean = np.average(veg_means, weights=weights)
-        weighted_std = np.sqrt(np.average((veg_means - weighted_mean)**2, weights=weights))
-        
-        if debug:
-            print(f"Vegetation density: weighted mean {weighted_mean:.4f}, weighted std {weighted_std:.4f}")
-        
-        # Calculate z-scores
-        z_scores = (veg_means - weighted_mean) / (weighted_std + 1e-10)
-        
-        if debug:
-            # Show distribution of z-scores
-            z_bins = np.linspace(min(z_scores), max(z_scores), 10)
-            hist, _ = np.histogram(z_scores, bins=z_bins)
-            print(f"Z-score distribution: {hist}")
-            print(f"Z-score range: {min(z_scores):.2f} to {max(z_scores):.2f}")
-        
-        # Identify low vegetation segments (negative z-score)
-        low_veg_mask = z_scores < z_score_threshold
-        low_veg_segments = segment_ids[low_veg_mask].tolist()
-        
-        segments_to_remove.extend(low_veg_segments)
-    
-    # Remove all identified segments
-    segments_to_remove = list(set(segments_to_remove))  # Remove duplicates
-    for label in segments_to_remove:
-        mask[labeled == label] = False
-    
-    if debug:
-        print(f"Removed {len(segments_to_remove)} segments out of {num_features}:")
-        print(f"  - {len(small_segments)} small segments")
-        print(f"  - {len(circular_segments)} circular segments")
-        print(f"  - {len(low_veg_segments)} low vegetation segments")
-    
-    return mask
-
-def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray, 
                    min_segment_size=1000, min_area_ratio=0.4, debug=False) -> np.ndarray:
     """Keep only segments that belong to the dominant cluster based on features.
-    Adaptively reduces number of clusters if resulting area is too small.
+    First compares all segments to the largest segment, removing those with >40% difference,
+    then applies clustering to the remaining segments.
     
     Args:
         mask: Binary mask containing segments to analyze
@@ -379,24 +252,31 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
     
     # Extract features for each segment
     segments_data = []
+    largest_segment_id = None
+    largest_segment_size = 0
     
     for i in range(1, num_features + 1):
         segment = labeled == i
         area = np.sum(segment)
         
-        area_ratio = area / total_mask_area
-        if area_ratio < 0.01:
-            area_bin = 0.25
-        elif area_ratio < 0.05:
-            area_bin = 0.5
-        elif area_ratio < 0.1:
-            area_bin = 0.75
-        else:
-            area_bin = 1
+        # Track largest segment
+        if area > largest_segment_size:
+            largest_segment_size = area
+            largest_segment_id = i
         
         # Skip tiny segments
         if area < min_segment_size:
             continue
+            
+        area_ratio = area / total_mask_area
+        if area_ratio < 0.005:
+            continue
+        elif area_ratio < 0.05:
+            area_bin = 0.5
+        elif area_ratio < 0.08:
+            area_bin = 0.75
+        else:
+            area_bin = 1
         
         # Calculate region properties
         props = regionprops(segment.astype(np.uint8))[0]
@@ -416,7 +296,8 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
         # Store segment features
         segments_data.append({
             'id': i,
-            'area': area_bin,
+            'area': area,
+            'area_bin': area_bin,
             'veg_mean': veg_mean,
             'veg_std': veg_std,
             'circularity': circularity,
@@ -430,55 +311,120 @@ def remove_outliers(mask: np.ndarray, threshold_img: np.ndarray,
     if debug:
         print("Segment features:")
         print(df)
+        
     
-    # Prepare data for clustering
-    X = df[['area', 'veg_mean', 'veg_std', 'circularity']].values
-    
-    # Adaptive clustering - try different numbers of clusters
-    best_result = None
-    best_area_ratio = 0
-    min_clusters = 2
-    max_clusters = min(4, len(X)-1)  # Start with 4 clusters or fewer if not enough segments
-    
-    for n_clusters in range(min_clusters, max_clusters+1, 1):
-        # Apply clustering
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
-        df['cluster'] = kmeans.fit_predict(X)
-        
-        # Identify the dominant cluster (most total area)
-        cluster_areas = df.groupby('cluster')['area'].sum()
-        dominant_cluster = cluster_areas.idxmax()
-        
-        # Keep only segments from dominant cluster
-        keep_segments = df[df['cluster'] == dominant_cluster]['id'].tolist()
-        result_mask = np.zeros_like(mask)
-        
-        for segment_id in keep_segments:
-            result_mask = np.logical_or(result_mask, labeled == segment_id)
-        
-        # Calculate area ratio
-        result_area = np.sum(result_mask)
-        area_ratio = result_area / total_mask_area
-        
-        if debug:
-            print(f"Clusters: {n_clusters}, Dominant: {dominant_cluster}, "
-                  f"Area ratio: {area_ratio:.2f}, Segments: {len(keep_segments)}/{len(df)}")
-        
-        # Check if this is the best result so far
-        if area_ratio > best_area_ratio:
-            best_area_ratio = area_ratio
-            best_result = result_mask
-        
-        # If area ratio is satisfactory, stop
-        if area_ratio >= min_area_ratio:
-            if debug:
-                print(f"Found satisfactory segmentation with {n_clusters} clusters")
-            return result_mask
+    # Find the largest segment in our dataframe
+    largest_segment = df.loc[df['area'].idxmax()]
     
     if debug:
-        print(f"Using best segmentation with area ratio {best_area_ratio:.2f}")
+        print(f"Largest segment features: ID={largest_segment['id']}, area={largest_segment['area']}, "
+              f"veg_mean={largest_segment['veg_mean']:.2f}, veg_std={largest_segment['veg_std']:.2f}, "
+              f"circularity={largest_segment['circularity']:.2f}")
     
-    return best_result if best_result is not None else np.zeros_like(mask)
+    # Calculate thresholds (±40% from largest segment values)
+    veg_mean_min = largest_segment['veg_mean'] * 0.15
+    veg_mean_max = largest_segment['veg_mean'] * 1.4
+    veg_std_min = largest_segment['veg_std'] * 0.6
+    veg_std_max = largest_segment['veg_std'] * 1.4
+    circularity_min = largest_segment['circularity'] * 0.6
+    circularity_max = largest_segment['circularity'] * 2.5
+    
+    # Filter segments that deviate too much from largest segment
+    filtered_segments = df[
+        (df['veg_mean'] >= veg_mean_min) & 
+        (df['veg_mean'] <= veg_mean_max) &
+        (df['veg_std'] >= veg_std_min) & 
+        (df['veg_std'] <= veg_std_max) &
+        (df['circularity'] >= circularity_min) & 
+        (df['circularity'] <= circularity_max)
+    ]
+    
+    # Report filtered segments
+    if debug:
+        filtered_count = len(df) - len(filtered_segments)
+        print(f"Filtered out {filtered_count} segments based on similarity to largest segment")
+        if filtered_count > 0:
+            print("Removed segments due to dissimilarity:")
+            for _, segment in df[~df['id'].isin(filtered_segments['id'])].iterrows():
+                reasons = []
+                if segment['veg_mean'] < veg_mean_min or segment['veg_mean'] > veg_mean_max:
+                    reasons.append(f"veg_mean={segment['veg_mean']:.2f}")
+                if segment['veg_std'] < veg_std_min or segment['veg_std'] > veg_std_max:
+                    reasons.append(f"veg_std={segment['veg_std']:.2f}")
+                if segment['circularity'] < circularity_min or segment['circularity'] > circularity_max:
+                    reasons.append(f"circularity={segment['circularity']:.2f}")
+                print(f"  Segment {segment['id']}: {', '.join(reasons)}")
+    
+    # If we have enough segments after initial filtering, proceed with clustering
+    if len(filtered_segments) >= 3:  # At least need 3 segments for meaningful clustering
+        # Prepare data for clustering using only filtered segments
+        X = filtered_segments[['area_bin', 'veg_mean', 'veg_std', 'circularity']].values
+        
+        # Adaptive clustering - try different numbers of clusters
+        best_result = None
+        best_area_ratio = 0
+        min_clusters = 2
+        max_clusters = min(4, len(X)-1)  # Start with 4 clusters or fewer if not enough segments
+        
+        for n_clusters in range(min_clusters, max_clusters+1, 1):
+            # Apply clustering
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
+            filtered_segments['cluster'] = kmeans.fit_predict(X)
+            
+            # Identify the dominant cluster (most total area)
+            cluster_areas = filtered_segments.groupby('cluster')['area'].sum()
+            dominant_cluster = cluster_areas.idxmax()
+            
+            # Keep only segments from dominant cluster
+            keep_segments = filtered_segments[filtered_segments['cluster'] == dominant_cluster]['id'].tolist()
+            result_mask = np.zeros_like(mask)
+            
+            for segment_id in keep_segments:
+                result_mask = np.logical_or(result_mask, labeled == segment_id)
+            
+            # Calculate area ratio
+            result_area = np.sum(result_mask)
+            area_ratio = result_area / total_mask_area
+            
+            if debug:
+                print(f"Clusters: {n_clusters}, Dominant: {dominant_cluster}, "
+                      f"Area ratio: {area_ratio:.2f}, Segments: {len(keep_segments)}/{len(filtered_segments)}")
+            
+            # Check if this is the best result so far
+            if area_ratio > best_area_ratio:
+                best_area_ratio = area_ratio
+                best_result = result_mask
+            
+            # If area ratio is satisfactory, stop
+            if area_ratio >= min_area_ratio:
+                if debug:
+                    print(f"Found satisfactory segmentation with {n_clusters} clusters")
+                return result_mask
+        
+        if best_result is not None and best_area_ratio > 0:
+            if debug:
+                print(f"Using best clustering result with area ratio {best_area_ratio:.2f}")
+                
+            return best_result
+    
+    # If clustering didn't yield good results or we have too few segments,
+    # just use the filtered segments
+    if debug:
+        print(f"Using filtered segments without clustering, count: {len(filtered_segments)}")
+    
+    # Create mask from filtered segments
+    result_mask = np.zeros_like(mask)
+    for segment_id in filtered_segments['id'].tolist():
+        result_mask = np.logical_or(result_mask, labeled == segment_id)
+    
+    # If result is too small, fall back to original mask
+    result_area_ratio = np.sum(result_mask) / total_mask_area
+    if result_area_ratio < 0.05:  # Very small result
+        if debug:
+            print(f"Filtered result too small ({result_area_ratio:.2f}), using original mask")
+        return mask
+    
+    return result_mask
 
 def process_single_file(input_file, output_dir, config, mask_generator, preprocess=True):
     """Process a single input file with progress tracking and timing information."""
@@ -607,10 +553,10 @@ def process_single_file(input_file, output_dir, config, mask_generator, preproce
     
     print("  → Removing statistical outliers...")
     outlier_start = time.time()
-    final_mask = remove_outliers(cleaned_mask, threshold_image, debug=save_debug_image, min_area_ratio=0.12)
+    final_mask = remove_outliers(cleaned_mask, threshold_image, debug=True, min_area_ratio=0.12)
     print(f"    ✓ Completed in {time.time() - outlier_start:.1f}s")
     
-    if config.get('save_debug', False):
+    if 1 or config.get('save_debug', False):
         save_debug_image(
             final_mask,
             output_dir=output_dir,

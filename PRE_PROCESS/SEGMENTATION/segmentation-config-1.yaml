@@ -16,7 +16,7 @@ segmentation:
   pixel_value_threshold: 0.3
   max_nodata_percentage: 0.00025
   outlier_threshold: -1.3
-  border_size: 10
+  border_size: 15
   nodata_value: [255, 255, 255, 0]
 
   # Initial segmentation settings
@@ -43,7 +43,7 @@ segmentation:
 
 # Processing control flags
 show_masks: False
-skip_enabled: False
+skip_enabled: True
 save_debug: False
 autumn_filtered: False
 seed: 42
