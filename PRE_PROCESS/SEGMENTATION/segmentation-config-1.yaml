@@ -43,7 +43,7 @@ segmentation:
 
 # Processing control flags
 show_masks: False
-skip_enabled: True
+skip_enabled: False
 save_debug: False
 autumn_filtered: False
 seed: 42

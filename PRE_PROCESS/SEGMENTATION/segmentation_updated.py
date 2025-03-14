@@ -33,9 +33,8 @@ def create_threshold_mask(image: np.ndarray, output_dir: str) -> np.ndarray:
     # Convert to float32 for calculations
     img = image.astype(np.float32)
     
-    # Calculate vegetation indices
-    shadow = np.log1p(img[:,:,1]) - np.log1p(img[:,:,2])
-    seasonal = (img[:,:,1] / (img[:,:,0] + img[:,:,1] + img[:,:,2] + 1)) * 255
+    shadow = (img[:,:,1] - img[:,:,2]) / (img[:,:,1] + img[:,:,2] + 1)
+    seasonal = (img[:,:,1] / (img[:,:,0] + img[:,:,1] + img[:,:,2] + 1))
     
     # Enhance using CLAHE
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -46,7 +45,7 @@ def create_threshold_mask(image: np.ndarray, output_dir: str) -> np.ndarray:
     weighted = (shadow * 0.5 + seasonal * 0.5).astype(np.uint8)
     
     # Edge detection and enhancement
-    blur = cv2.GaussianBlur(weighted, (5, 5), 0)
+    blur = cv2.GaussianBlur(weighted , (5, 5), 0)
     sobel = np.sqrt(
         cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)**2 + 
         cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)**2
