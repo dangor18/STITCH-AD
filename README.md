@@ -61,9 +61,8 @@ scale_ratio: 0.5
 ---
 repeat for next orchard
 ```
-```
 Data Organisation:
-
+```yaml
 A:/STITCH-O/Ortho-1
 ├── orthos
     ├── data-analysis
