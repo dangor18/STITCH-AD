@@ -26,4 +26,4 @@ The coded is structured as follows:
 
 + 📄 inference.py (your entry point to the orchard classification)
 
-Reverse Distillation (RD) and UniAD were the two models evaluated for patch level anomaly detection. The DATA folder contains relevant code for turning orthomosaics into patches
+Reverse Distillation (RD) and UniAD were the two models evaluated for patch level anomaly detection. The DATA folder contains relevant code for turning orthomosaics into patches saved as .npy files.
