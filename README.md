@@ -76,8 +76,8 @@ A:/STITCH-O/Ortho-1
 Output Example:
 
 working directory
-├── chunker.py
-└── chunks
+├── patch_maker.py
+└── patches
     ├──  1
     |   ├── test
     |   |   ├── Case_1
