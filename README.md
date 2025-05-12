@@ -75,7 +75,7 @@ A:/STITCH-O/Ortho-1
 
 Output Example:
 
-working directory
+DATA
 ├── patch_maker.py
 └── patches
     ├──  1
